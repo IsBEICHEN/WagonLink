@@ -1,24 +1,56 @@
 # WagonLink
 
-WagonLink 是一个最小可用的安卓直播/IPTV 播放器，用来加载用户自己提供且有权访问的订阅链接。
+WagonLink 是一个 Android 直播 / IPTV 播放器，用来加载用户自己提供且有权访问的订阅链接。
 
-支持能力：
+项目不内置频道，不采集内容源，也不绕过访问限制。请只使用你有权访问的直播源或订阅源。
 
-- HTTP/HTTPS 订阅链接，包括 bit.ly 这类会跳转的短链接。
-- 带 `#EXTINF` 元数据的 M3U/M3U8 频道列表。
-- 简单的 `频道名,播放地址` 文本列表。
-- 常见 JSON 频道列表，例如数组对象，或包含 `channels` / `data` / `items` 的对象。
-- 分组筛选、频道搜索，以及通过 AndroidX Media3 播放 HLS/DASH/HTTP/RTSP 流。
+## 下载
 
-这个项目不内置频道、不采集内容源，也不绕过访问限制。请只粘贴你有权使用的直播源或订阅源。
+当前版本：`3.1`
+
+- GitHub 仓库内下载：[WagonLink-3.1-debug.apk](https://github.com/IsBEICHEN/WagonLink/blob/main/releases/WagonLink-3.1-debug.apk)
+- 直接下载链接：[WagonLink-3.1-debug.apk](https://raw.githubusercontent.com/IsBEICHEN/WagonLink/main/releases/WagonLink-3.1-debug.apk)
+
+说明：
+
+- 当前 APK 是 debug 包，适合个人安装测试。
+- 当前版本要求 Android 12 或以上。
+- 如果手机提示安装来源风险，需要在系统设置里允许当前文件管理器或浏览器安装未知来源应用。
+
+## 功能
+
+- 支持 HTTP / HTTPS 订阅链接，包括短链接跳转。
+- 支持 M3U / M3U8 频道列表。
+- 支持简单文本格式的频道列表。
+- 支持常见 JSON 频道列表。
+- 支持频道分组筛选和频道搜索。
+- 支持保存多个订阅，并在频道页快速切换。
+- 支持自动加载上次选择的订阅。
+- 支持解析成功后的频道缓存，减少重复加载订阅。
+- 支持 HLS、DASH、HTTP progressive、RTSP 等播放类型。
+- 对没有 `.m3u8` 后缀但实际是 HLS 的部分直播网关地址做了兼容处理。
+- 使用毛玻璃风格界面、圆角底部菜单和页面切换动画。
 
 ## 构建
 
-1. 用 Android Studio 打开本文件夹。
-2. 按提示安装 Android SDK 和 Gradle 组件。
-3. 选择 `app` 配置，在模拟器或安卓手机上运行。
+1. 使用 Android Studio 打开本项目目录。
+2. 安装提示所需的 Android SDK 和 Gradle 组件。
+3. 选择 `app` 配置，连接 Android 12 或以上设备运行。
+
+也可以在命令行构建：
+
+```powershell
+.\gradlew.bat assembleDebug
+```
+
+构建产物默认位于：
+
+```text
+app/build/outputs/apk/debug/app-debug.apk
+```
 
 ## 说明
 
-- 已启用 `android:usesCleartextTraffic="true"`，因为一些自用测试直播源仍然使用 HTTP。
-- 如果订阅链接直接指向媒体播放列表，而不是频道列表，应用会把它当成单个直播源播放。
+- 已启用 `android:usesCleartextTraffic="true"`，因为部分自用测试直播源仍然使用 HTTP。
+- 如果订阅链接直接指向媒体播放列表，而不是频道列表，应用会把它作为单个直播源处理。
+- 受 token、地区、源站限流、服务端鉴权影响的频道，可能仍然无法播放。这类情况不一定是播放器问题。
