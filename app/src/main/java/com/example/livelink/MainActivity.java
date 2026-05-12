@@ -140,6 +140,7 @@ public final class MainActivity extends Activity {
         player.addListener(new Player.Listener() {
             @Override
             public void onPlaybackStateChanged(int playbackState) {
+                updateKeepScreenOn();
                 if (playbackState == Player.STATE_BUFFERING) {
                     showVideoLoading("正在连接: " + selectedChannelName);
                 } else if (playbackState == Player.STATE_READY) {
@@ -152,6 +153,7 @@ public final class MainActivity extends Activity {
 
             @Override
             public void onPlayerError(PlaybackException error) {
+                updateKeepScreenOn();
                 String message = error.getMessage() == null || error.getMessage().trim().isEmpty()
                         ? "频道连接失败"
                         : error.getMessage();
@@ -1112,6 +1114,7 @@ public final class MainActivity extends Activity {
             player.setMediaItem(mediaItem);
             player.prepare();
             player.play();
+            updateKeepScreenOn();
             statusText.setText("正在播放: " + channel.name);
         } catch (Exception exception) {
             statusText.setText("播放失败: " + exception.getMessage());
@@ -1275,6 +1278,7 @@ public final class MainActivity extends Activity {
         contentHost.setPadding(0, 0, 0, 0);
         rootLayout.getChildAt(1).setVisibility(fullscreen ? View.GONE : View.VISIBLE);
         updatePlayerInfoOverlay();
+        updateKeepScreenOn();
 
         LinearLayout.LayoutParams params = (LinearLayout.LayoutParams) playerContainer.getLayoutParams();
         params.width = ViewGroup.LayoutParams.MATCH_PARENT;
@@ -1301,6 +1305,26 @@ public final class MainActivity extends Activity {
             setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED);
             window.clearFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
             configureWindow();
+        }
+    }
+
+    private void updateKeepScreenOn() {
+        boolean playingOrBuffering = player != null
+                && player.getPlayWhenReady()
+                && (player.getPlaybackState() == Player.STATE_READY
+                || player.getPlaybackState() == Player.STATE_BUFFERING);
+        boolean keepOn = isFullscreen || playingOrBuffering;
+        Window window = getWindow();
+        if (keepOn) {
+            window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+            if (playerView != null) {
+                playerView.setKeepScreenOn(true);
+            }
+        } else {
+            window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+            if (playerView != null) {
+                playerView.setKeepScreenOn(false);
+            }
         }
     }
 
@@ -1438,6 +1462,7 @@ public final class MainActivity extends Activity {
     @Override
     protected void onDestroy() {
         destroyed = true;
+        getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         if (player != null) {
             player.release();
             player = null;

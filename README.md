@@ -6,10 +6,10 @@ WagonLink 是一个 Android 直播 / IPTV 播放器，用来加载用户自己�
 
 ## 下载
 
-当前版本：`3.1`
+当前版本：`3.2`
 
-- GitHub 仓库内下载：[WagonLink-3.1-debug.apk](https://github.com/IsBEICHEN/WagonLink/blob/main/releases/WagonLink-3.1-debug.apk)
-- 直接下载链接：[WagonLink-3.1-debug.apk](https://raw.githubusercontent.com/IsBEICHEN/WagonLink/main/releases/WagonLink-3.1-debug.apk)
+- GitHub 仓库内下载：[WagonLink-3.2-debug.apk](https://github.com/IsBEICHEN/WagonLink/blob/main/releases/WagonLink-3.2-debug.apk)
+- 直接下载链接：[WagonLink-3.2-debug.apk](https://raw.githubusercontent.com/IsBEICHEN/WagonLink/main/releases/WagonLink-3.2-debug.apk)
 
 说明：
 
