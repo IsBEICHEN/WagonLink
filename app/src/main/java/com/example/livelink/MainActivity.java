@@ -19,6 +19,7 @@ import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.Window;
+import android.view.WindowInsets;
 import android.view.WindowManager;
 import android.view.inputmethod.InputMethodManager;
 import android.view.animation.DecelerateInterpolator;
@@ -40,12 +41,16 @@ import androidx.media3.common.MediaItem;
 import androidx.media3.common.MimeTypes;
 import androidx.media3.common.PlaybackException;
 import androidx.media3.common.Player;
+import androidx.media3.datasource.DefaultHttpDataSource;
 import androidx.media3.exoplayer.ExoPlayer;
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory;
 import androidx.media3.ui.PlayerView;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -71,6 +76,7 @@ public final class MainActivity extends Activity {
     private FrameLayout contentHost;
     private LinearLayout channelPage;
     private LinearLayout subscriptionPage;
+    private LinearLayout settingsPage;
     private View channelTopBar;
     private FrameLayout playerContainer;
     private PlayerView playerView;
@@ -78,7 +84,10 @@ public final class MainActivity extends Activity {
     private ProgressBar videoProgressBar;
     private TextView playerStatusText;
     private TextView fullscreenInfoText;
+    private TextView playerInfoText;
     private Button fullscreenButton;
+    private Button lockButton;
+    private Button unlockButton;
     private LinearLayout channelControls;
     private ScrollView channelScrollView;
     private LinearLayout channelListContent;
@@ -88,10 +97,12 @@ public final class MainActivity extends Activity {
     private Button refreshButton;
     private TextView channelTabButton;
     private TextView subscriptionTabButton;
+    private TextView settingsTabButton;
     private TextView statusText;
     private TextView channelCountText;
     private TextView activeSourceText;
     private TextView emptyStateText;
+    private FrameLayout bottomTabsHost;
     private ProgressBar progressBar;
     private ListView subscriptionListView;
     private ArrayAdapter<String> subscriptionListAdapter;
@@ -102,9 +113,15 @@ public final class MainActivity extends Activity {
     private TextView themePicker;
     private Switch glassEffectSwitch;
     private TextView subscriptionStatusText;
+    private PopupWindow subscriptionEditorPopup;
     private boolean destroyed;
     private boolean isFullscreen;
+    private boolean fullscreenControlsVisible;
+    private boolean fullscreenLocked;
+    private boolean videoFeedbackRequested;
+    private boolean videoFeedbackLoading;
     private boolean tabLayoutReady;
+    private int currentTabIndex;
     private int playRequestToken;
     private String activeSubscriptionUrl = "";
     private String activeSubscriptionId = "";
@@ -114,6 +131,11 @@ public final class MainActivity extends Activity {
     private String editingSubscriptionId = "";
     private String themeMode = AppPreferences.THEME_SYSTEM;
     private boolean glassEffectEnabled;
+    private final Runnable hideFullscreenControlsRunnable = () -> {
+        if (isFullscreen) {
+            setFullscreenControlsVisible(false);
+        }
+    };
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -253,8 +275,10 @@ public final class MainActivity extends Activity {
         contentHost = new FrameLayout(this);
         channelPage = buildChannelPage();
         subscriptionPage = buildSubscriptionPage();
+        settingsPage = buildSettingsPage();
         contentHost.addView(channelPage, fillFrame());
         contentHost.addView(subscriptionPage, fillFrame());
+        contentHost.addView(settingsPage, fillFrame());
 
         rootLayout.addView(contentHost, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
@@ -262,7 +286,7 @@ public final class MainActivity extends Activity {
                 1));
         rootLayout.addView(buildBottomTabs(), new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
-                dp(84)));
+                dp(96)));
 
         return rootLayout;
     }
@@ -271,7 +295,7 @@ public final class MainActivity extends Activity {
         LinearLayout page = new LinearLayout(this);
         page.setOrientation(LinearLayout.VERTICAL);
         page.setBackgroundColor(colorAppBg);
-        page.setPadding(0, dp(28), 0, 0);
+        page.setPadding(0, dp(26), 0, 0);
 
         channelTopBar = buildChannelTopBar();
         page.addView(channelTopBar);
@@ -288,17 +312,17 @@ public final class MainActivity extends Activity {
         LinearLayout bar = new LinearLayout(this);
         bar.setOrientation(LinearLayout.HORIZONTAL);
         bar.setGravity(Gravity.CENTER_VERTICAL);
-        bar.setPadding(dp(14), 0, dp(14), 0);
+        bar.setPadding(dp(18), 0, dp(18), 0);
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
-                dp(42));
-        params.setMargins(dp(10), 0, dp(10), dp(8));
+                dp(44));
+        params.setMargins(0, 0, 0, dp(6));
         bar.setLayoutParams(params);
 
         TextView title = new TextView(this);
         title.setText("WagonLink");
         title.setTextColor(colorText);
-        title.setTextSize(22);
+        title.setTextSize(23);
         title.setTypeface(Typeface.DEFAULT_BOLD);
         title.setGravity(Gravity.CENTER_VERTICAL);
         title.setSingleLine(true);
@@ -309,27 +333,48 @@ public final class MainActivity extends Activity {
         activeSourceText.setTextSize(12);
         activeSourceText.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         activeSourceText.setSingleLine(true);
+        activeSourceText.setEllipsize(TextUtils.TruncateAt.END);
+        activeSourceText.setPadding(dp(10), 0, 0, 0);
 
         bar.addView(title, weighted(0, 42));
-        bar.addView(activeSourceText, weighted(0, 42));
+        bar.addView(activeSourceText, new LinearLayout.LayoutParams(dp(138), dp(42)));
         return bar;
     }
 
     private View buildPlayer() {
         playerContainer = new FrameLayout(this);
         playerContainer.setBackground(roundRect(Color.BLACK, 20));
-        playerContainer.setOnClickListener(view -> hideKeyboard());
+        playerContainer.setOnClickListener(view -> handlePlayerSurfaceTap());
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
-                dp(184));
+                dp(166));
         params.setMargins(dp(10), dp(4), dp(10), dp(8));
         playerContainer.setLayoutParams(params);
 
         playerView = new PlayerView(this);
         playerView.setPlayer(player);
         playerView.setUseController(true);
+        playerView.setControllerAutoShow(true);
+        playerView.setControllerShowTimeoutMs(4000);
+        playerView.setOnClickListener(view -> handlePlayerSurfaceTap());
         playerView.setBackgroundColor(Color.BLACK);
         playerContainer.addView(playerView, fillFrame());
+
+        playerInfoText = new TextView(this);
+        playerInfoText.setText("选择频道后开始播放");
+        playerInfoText.setTextColor(Color.WHITE);
+        playerInfoText.setTextSize(13);
+        playerInfoText.setTypeface(Typeface.DEFAULT_BOLD);
+        playerInfoText.setSingleLine(true);
+        playerInfoText.setEllipsize(TextUtils.TruncateAt.END);
+        playerInfoText.setPadding(dp(12), 0, dp(12), 0);
+        playerInfoText.setBackground(roundRect(0xAA111827, 16));
+        FrameLayout.LayoutParams playerInfoParams = new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                dp(36),
+                Gravity.START | Gravity.TOP);
+        playerInfoParams.setMargins(dp(10), dp(10), dp(100), 0);
+        playerContainer.addView(playerInfoText, playerInfoParams);
 
         LinearLayout feedback = new LinearLayout(this);
         feedback.setOrientation(LinearLayout.VERTICAL);
@@ -382,22 +427,42 @@ public final class MainActivity extends Activity {
         FrameLayout.LayoutParams fullscreenParams = new FrameLayout.LayoutParams(
                 dp(78),
                 dp(40),
-                Gravity.END | Gravity.BOTTOM);
-        fullscreenParams.setMargins(0, 0, dp(10), dp(10));
+                Gravity.END | Gravity.TOP);
+        fullscreenParams.setMargins(0, dp(10), dp(10), 0);
         playerContainer.addView(fullscreenButton, fullscreenParams);
+
+        lockButton = pillButton("锁定", 0xCC111827, Color.WHITE);
+        lockButton.setTextSize(13);
+        lockButton.setVisibility(View.GONE);
+        lockButton.setOnClickListener(view -> lockFullscreenControls());
+        FrameLayout.LayoutParams lockParams = new FrameLayout.LayoutParams(
+                dp(78),
+                dp(40),
+                Gravity.START | Gravity.CENTER_VERTICAL);
+        lockParams.setMargins(dp(12), 0, 0, 0);
+        playerContainer.addView(lockButton, lockParams);
+
+        unlockButton = pillButton("解锁", 0xDD111827, Color.WHITE);
+        unlockButton.setTextSize(13);
+        unlockButton.setVisibility(View.GONE);
+        unlockButton.setOnClickListener(view -> unlockFullscreenControls());
+        FrameLayout.LayoutParams unlockParams = new FrameLayout.LayoutParams(
+                dp(86),
+                dp(44),
+                Gravity.START | Gravity.CENTER_VERTICAL);
+        unlockParams.setMargins(dp(16), 0, 0, 0);
+        playerContainer.addView(unlockButton, unlockParams);
         return playerContainer;
     }
 
     private View buildChannelControls() {
         channelControls = new LinearLayout(this);
         channelControls.setOrientation(LinearLayout.VERTICAL);
-        channelControls.setPadding(dp(12), dp(12), dp(12), dp(8));
-        channelControls.setBackground(roundRectWithStroke(colorCard, 20));
-        channelControls.setElevation(glassEffectEnabled ? dp(8) : 0);
+        channelControls.setPadding(dp(10), 0, dp(10), dp(6));
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT);
-        params.setMargins(dp(10), 0, dp(10), dp(8));
+        params.setMargins(0, 0, 0, dp(2));
         channelControls.setLayoutParams(params);
 
         LinearLayout sourceRow = new LinearLayout(this);
@@ -410,15 +475,21 @@ public final class MainActivity extends Activity {
         refreshButton = pillButton("刷新", COLOR_PRIMARY, Color.WHITE);
         refreshButton.setOnClickListener(view -> loadSubscription(true));
 
-        sourceRow.addView(channelSubscriptionPicker, weighted(0, 52));
-        sourceRow.addView(space(dp(10), 1));
-        sourceRow.addView(refreshButton, new LinearLayout.LayoutParams(dp(84), dp(52)));
+        sourceRow.addView(channelSubscriptionPicker, weighted(0, 46));
+        sourceRow.addView(space(dp(8), 1));
+        sourceRow.addView(refreshButton, new LinearLayout.LayoutParams(dp(78), dp(46)));
         channelControls.addView(sourceRow);
 
         LinearLayout filterRow = new LinearLayout(this);
         filterRow.setGravity(Gravity.CENTER_VERTICAL);
         filterRow.setOrientation(LinearLayout.HORIZONTAL);
-        filterRow.setPadding(0, dp(10), 0, 0);
+        filterRow.setPadding(dp(10), dp(8), dp(10), dp(8));
+        filterRow.setBackground(roundRectWithStroke(colorCard, 18));
+        filterRow.setElevation(glassEffectEnabled ? dp(6) : 0);
+        LinearLayout.LayoutParams filterParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT);
+        filterParams.setMargins(0, dp(8), 0, 0);
 
         groupPicker = picker("全部");
         groupPicker.setOnClickListener(view -> showGroupPicker());
@@ -432,23 +503,23 @@ public final class MainActivity extends Activity {
             }
         });
 
-        filterRow.addView(groupPicker, new LinearLayout.LayoutParams(dp(136), dp(52)));
-        filterRow.addView(space(dp(10), 1));
-        filterRow.addView(searchInput, weighted(0, 52));
-        channelControls.addView(filterRow);
+        filterRow.addView(groupPicker, new LinearLayout.LayoutParams(dp(128), dp(44)));
+        filterRow.addView(space(dp(8), 1));
+        filterRow.addView(searchInput, weighted(0, 44));
+        channelControls.addView(filterRow, filterParams);
 
         progressBar = new ProgressBar(this);
         progressBar.setIndeterminate(true);
         progressBar.setVisibility(View.GONE);
 
         channelCountText = smallText("暂无频道");
-        statusText = smallText("在底部订阅页添加订阅源");
+        statusText = smallText("在订阅页添加订阅源");
         channelCountText.setGravity(Gravity.CENTER_VERTICAL);
         statusText.setGravity(Gravity.CENTER_VERTICAL);
         LinearLayout infoRow = new LinearLayout(this);
         infoRow.setGravity(Gravity.CENTER_VERTICAL);
         infoRow.setOrientation(LinearLayout.HORIZONTAL);
-        infoRow.setPadding(0, dp(8), 0, 0);
+        infoRow.setPadding(dp(4), dp(6), dp(4), 0);
         infoRow.addView(progressBar, new LinearLayout.LayoutParams(dp(22), dp(22)));
         infoRow.addView(channelCountText, weighted(0, 24));
         channelControls.addView(infoRow);
@@ -473,7 +544,7 @@ public final class MainActivity extends Activity {
                 ViewGroup.LayoutParams.WRAP_CONTENT));
 
         emptyStateText = new TextView(this);
-        emptyStateText.setText("暂无频道\n先到底部订阅页添加订阅源");
+        emptyStateText.setText("暂无频道\n请在订阅页添加订阅源或刷新当前订阅");
         emptyStateText.setTextColor(colorMuted);
         emptyStateText.setTextSize(15);
         emptyStateText.setGravity(Gravity.CENTER);
@@ -488,101 +559,33 @@ public final class MainActivity extends Activity {
         LinearLayout page = new LinearLayout(this);
         page.setOrientation(LinearLayout.VERTICAL);
         page.setBackgroundColor(colorAppBg);
-        page.setPadding(dp(24), dp(30), dp(24), dp(10));
+        page.setPadding(dp(18), dp(30), dp(18), dp(10));
+
+        LinearLayout header = new LinearLayout(this);
+        header.setOrientation(LinearLayout.HORIZONTAL);
+        header.setGravity(Gravity.CENTER_VERTICAL);
+
+        Button addButton = pillButton("+", COLOR_PRIMARY, Color.WHITE);
+        addButton.setTextSize(22);
+        addButton.setOnClickListener(view -> clearSubscriptionEditor());
+        header.addView(addButton, new LinearLayout.LayoutParams(dp(46), dp(42)));
 
         TextView title = new TextView(this);
         title.setText("订阅");
         title.setTextColor(colorText);
         title.setTextSize(24);
         title.setTypeface(Typeface.DEFAULT_BOLD);
-        page.addView(title);
+        title.setGravity(Gravity.CENTER_VERTICAL);
+        title.setPadding(dp(12), 0, 0, 0);
+        header.addView(title, weighted(0, 42));
+        page.addView(header);
 
-        TextView subtitle = smallText("保存多个订阅源，在频道页快速切换。");
+        subscriptionStatusText = smallText("点按加载订阅，长按可编辑或删除。左上角 + 可新增。");
         LinearLayout.LayoutParams subtitleParams = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT);
-        subtitleParams.setMargins(0, dp(2), 0, dp(10));
-        page.addView(subtitle, subtitleParams);
-
-        LinearLayout appearance = new LinearLayout(this);
-        appearance.setOrientation(LinearLayout.VERTICAL);
-        appearance.setPadding(dp(12), dp(10), dp(12), dp(10));
-        appearance.setBackground(roundRectWithStroke(colorCard, 20));
-        appearance.setElevation(glassEffectEnabled ? dp(8) : 0);
-        LinearLayout.LayoutParams appearanceParams = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT);
-        appearanceParams.setMargins(0, 0, 0, dp(10));
-
-        TextView appearanceTitle = new TextView(this);
-        appearanceTitle.setText("外观");
-        appearanceTitle.setTextColor(colorText);
-        appearanceTitle.setTextSize(16);
-        appearanceTitle.setTypeface(Typeface.DEFAULT_BOLD);
-        themePicker = picker(themeLabel(themeMode));
-        themePicker.setOnClickListener(view -> showThemePicker());
-        appearance.addView(appearanceTitle);
-        appearance.addView(themePicker, topMarginParams(dp(46), dp(8)));
-        TextView versionText = smallText("当前版本: " + BuildConfig.VERSION_NAME);
-        versionText.setGravity(Gravity.CENTER_VERTICAL);
-        versionText.setPadding(dp(12), 0, dp(12), 0);
-        versionText.setBackground(roundRectWithStroke(colorField, 14));
-        appearance.addView(versionText, topMarginParams(dp(44), dp(8)));
-        page.addView(appearance, appearanceParams);
-
-        LinearLayout editor = new LinearLayout(this);
-        editor.setOrientation(LinearLayout.VERTICAL);
-        editor.setPadding(dp(12), dp(12), dp(12), dp(12));
-        editor.setBackground(roundRectWithStroke(colorCard, 20));
-        editor.setElevation(glassEffectEnabled ? dp(8) : 0);
-
-        subscriptionNameInput = field("订阅名称，可不填");
-        subscriptionUrlInput = field("订阅链接");
-        subscriptionUrlInput.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
-
-        editor.addView(subscriptionNameInput, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                dp(46)));
-        editor.addView(subscriptionUrlInput, topMarginParams(dp(46), dp(8)));
-
-        LinearLayout actionRow = new LinearLayout(this);
-        actionRow.setOrientation(LinearLayout.HORIZONTAL);
-        actionRow.setGravity(Gravity.CENTER_VERTICAL);
-        actionRow.setPadding(0, dp(10), 0, 0);
-
-        saveSubscriptionButton = pillButton("保存并加载", COLOR_PRIMARY, Color.WHITE);
-        saveSubscriptionButton.setOnClickListener(view -> saveEditedSubscription());
-        deleteSubscriptionButton = pillButton("删除", 0xFF2A2030, COLOR_DANGER);
-        deleteSubscriptionButton.setOnClickListener(view -> deleteEditedSubscription());
-
-        actionRow.addView(saveSubscriptionButton, weighted(0, 44));
-        actionRow.addView(space(dp(8), 1));
-        actionRow.addView(deleteSubscriptionButton, weighted(0, 44));
-        editor.addView(actionRow);
-
-        subscriptionStatusText = smallText("点下面列表可编辑订阅；清空表单可新增。");
-        LinearLayout.LayoutParams statusParams = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT);
-        statusParams.setMargins(0, dp(8), 0, 0);
-        editor.addView(subscriptionStatusText, statusParams);
-
-        page.addView(editor);
-
-        LinearLayout listHeader = new LinearLayout(this);
-        listHeader.setGravity(Gravity.CENTER_VERTICAL);
-        listHeader.setOrientation(LinearLayout.HORIZONTAL);
-        listHeader.setPadding(0, dp(12), 0, dp(6));
-        TextView listTitle = new TextView(this);
-        listTitle.setText("已保存订阅");
-        listTitle.setTextColor(colorText);
-        listTitle.setTextSize(16);
-        listTitle.setTypeface(Typeface.DEFAULT_BOLD);
-        Button newButton = pillButton("新增", colorField, colorText);
-        newButton.setOnClickListener(view -> clearSubscriptionEditor());
-        listHeader.addView(listTitle, weighted(0, 36));
-        listHeader.addView(newButton, new LinearLayout.LayoutParams(dp(76), dp(38)));
-        page.addView(listHeader);
+        subtitleParams.setMargins(0, dp(6), 0, dp(10));
+        page.addView(subscriptionStatusText, subtitleParams);
 
         subscriptionListAdapter = new SubscriptionListAdapter(this);
         subscriptionListView = new ListView(this);
@@ -593,7 +596,11 @@ public final class MainActivity extends Activity {
         subscriptionListView.setBackgroundColor(colorAppBg);
         subscriptionListView.setClipToPadding(false);
         subscriptionListView.setPadding(0, 0, 0, dp(8));
-        subscriptionListView.setOnItemClickListener((parent, view, position, id) -> editSubscription(position));
+        subscriptionListView.setOnItemClickListener((parent, view, position, id) -> loadSubscriptionAt(position));
+        subscriptionListView.setOnItemLongClickListener((parent, view, position, id) -> {
+            showSubscriptionActions(position);
+            return true;
+        });
         page.addView(subscriptionListView, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 0,
@@ -602,6 +609,54 @@ public final class MainActivity extends Activity {
         return page;
     }
 
+    private LinearLayout buildSettingsPage() {
+        LinearLayout page = new LinearLayout(this);
+        page.setOrientation(LinearLayout.VERTICAL);
+        page.setBackgroundColor(colorAppBg);
+        page.setPadding(dp(18), dp(30), dp(18), dp(10));
+
+        TextView title = new TextView(this);
+        title.setText("设置");
+        title.setTextColor(colorText);
+        title.setTextSize(24);
+        title.setTypeface(Typeface.DEFAULT_BOLD);
+        page.addView(title);
+
+        TextView subtitle = smallText("外观、版本和基础偏好设置。");
+        LinearLayout.LayoutParams subtitleParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT);
+        subtitleParams.setMargins(0, dp(4), 0, dp(12));
+        page.addView(subtitle, subtitleParams);
+
+        LinearLayout appearance = new LinearLayout(this);
+        appearance.setOrientation(LinearLayout.VERTICAL);
+        appearance.setPadding(dp(14), dp(12), dp(14), dp(12));
+        appearance.setBackground(roundRectWithStroke(colorCard, 22));
+        appearance.setElevation(glassEffectEnabled ? dp(8) : 0);
+
+        TextView appearanceTitle = new TextView(this);
+        appearanceTitle.setText("外观");
+        appearanceTitle.setTextColor(colorText);
+        appearanceTitle.setTextSize(16);
+        appearanceTitle.setTypeface(Typeface.DEFAULT_BOLD);
+        appearance.addView(appearanceTitle);
+
+        themePicker = picker("主题模式  " + themeLabel(themeMode));
+        themePicker.setOnClickListener(view -> showThemePicker());
+        appearance.addView(themePicker, topMarginParams(dp(44), dp(8)));
+
+        TextView versionText = smallText("当前版本: " + BuildConfig.VERSION_NAME);
+        versionText.setGravity(Gravity.CENTER_VERTICAL);
+        versionText.setPadding(dp(12), 0, dp(12), 0);
+        versionText.setBackground(roundRectWithStroke(colorField, 14));
+        appearance.addView(versionText, topMarginParams(dp(44), dp(8)));
+
+        page.addView(appearance, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT));
+        return page;
+    }
     private View buildGlassEffectRow() {
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
@@ -629,53 +684,74 @@ public final class MainActivity extends Activity {
     }
 
     private View buildBottomTabs() {
-        FrameLayout host = new FrameLayout(this);
-        host.setPadding(dp(18), dp(8), dp(18), dp(14));
-        host.setBackgroundColor(Color.TRANSPARENT);
+        bottomTabsHost = new FrameLayout(this);
+        bottomTabsHost.setPadding(dp(16), dp(6), dp(16), dp(28));
+        bottomTabsHost.setBackgroundColor(Color.TRANSPARENT);
+        bottomTabsHost.setOnApplyWindowInsetsListener((view, insets) -> {
+            int navigationBottom = insets.getInsets(WindowInsets.Type.navigationBars()).bottom;
+            int bottomPadding = Math.max(dp(28), navigationBottom + dp(12));
+            view.setPadding(dp(16), dp(6), dp(16), bottomPadding);
+            ViewGroup.LayoutParams layoutParams = view.getLayoutParams();
+            if (layoutParams != null) {
+                layoutParams.height = dp(58) + dp(6) + bottomPadding;
+                view.setLayoutParams(layoutParams);
+            }
+            return insets;
+        });
 
         LinearLayout tabs = new LinearLayout(this);
         tabs.setOrientation(LinearLayout.HORIZONTAL);
         tabs.setGravity(Gravity.CENTER);
-        tabs.setPadding(dp(8), dp(6), dp(8), dp(6));
+        tabs.setPadding(dp(6), dp(5), dp(6), dp(5));
         tabs.setBackground(glassEffectEnabled
                 ? roundRectWithStroke(colorBottomBar, 30)
                 : roundRectWithStroke(colorBottomBar, 30));
         tabs.setElevation(glassEffectEnabled ? dp(14) : dp(6));
 
         channelTabButton = tabButton("频道");
-        channelTabButton.setOnClickListener(view -> showTab(true));
+        channelTabButton.setOnClickListener(view -> showTab(0));
         subscriptionTabButton = tabButton("订阅");
-        subscriptionTabButton.setOnClickListener(view -> showTab(false));
+        subscriptionTabButton.setOnClickListener(view -> showTab(1));
+        settingsTabButton = tabButton("设置");
+        settingsTabButton.setOnClickListener(view -> showTab(2));
 
         tabs.addView(channelTabButton, weighted(0, 48));
-        tabs.addView(space(dp(10), 1));
+        tabs.addView(space(dp(6), 1));
         tabs.addView(subscriptionTabButton, weighted(0, 48));
+        tabs.addView(space(dp(6), 1));
+        tabs.addView(settingsTabButton, weighted(0, 48));
         FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
-                dp(62),
-                Gravity.CENTER);
-        host.addView(tabs, params);
-        return host;
+                dp(58),
+                Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
+        bottomTabsHost.addView(tabs, params);
+        return bottomTabsHost;
     }
 
     private void showTab(boolean channels) {
+        showTab(channels ? 0 : 1);
+    }
+
+    private void showTab(int tabIndex) {
         hideKeyboard();
-        updateTabButtons(channels);
-        View target = channels ? channelPage : subscriptionPage;
-        View outgoing = channels ? subscriptionPage : channelPage;
+        updateTabButtons(tabIndex);
+        View target = pageForTab(tabIndex);
+        View outgoing = pageForTab(currentTabIndex);
         if (!tabLayoutReady) {
-            channelPage.setVisibility(channels ? View.VISIBLE : View.GONE);
-            subscriptionPage.setVisibility(channels ? View.GONE : View.VISIBLE);
+            channelPage.setVisibility(tabIndex == 0 ? View.VISIBLE : View.GONE);
+            subscriptionPage.setVisibility(tabIndex == 1 ? View.VISIBLE : View.GONE);
+            settingsPage.setVisibility(tabIndex == 2 ? View.VISIBLE : View.GONE);
             target.setAlpha(1f);
             target.setTranslationY(0f);
-            outgoing.setAlpha(1f);
-            outgoing.setTranslationY(0f);
+            currentTabIndex = tabIndex;
             tabLayoutReady = true;
             return;
         }
         if (target.getVisibility() == View.VISIBLE) {
+            currentTabIndex = tabIndex;
             return;
         }
+        currentTabIndex = tabIndex;
         target.setVisibility(View.VISIBLE);
         target.setAlpha(0f);
         target.setTranslationY(dp(10));
@@ -698,9 +774,19 @@ public final class MainActivity extends Activity {
                 .start();
     }
 
-    private void updateTabButtons(boolean channels) {
-        styleTabButton(channelTabButton, channels);
-        styleTabButton(subscriptionTabButton, !channels);
+    private View pageForTab(int tabIndex) {
+        if (tabIndex == 1) {
+            return subscriptionPage;
+        }
+        if (tabIndex == 2) {
+            return settingsPage;
+        }
+        return channelPage;
+    }
+    private void updateTabButtons(int tabIndex) {
+        styleTabButton(channelTabButton, tabIndex == 0);
+        styleTabButton(subscriptionTabButton, tabIndex == 1);
+        styleTabButton(settingsTabButton, tabIndex == 2);
     }
 
     private void styleTabButton(TextView button, boolean selected) {
@@ -749,10 +835,10 @@ public final class MainActivity extends Activity {
         }
         subscriptionListAdapter.clear();
         if (subscriptions.isEmpty()) {
-            subscriptionListAdapter.add("暂无订阅，点上方保存一个。");
+            subscriptionListAdapter.add("暂无订阅，点击左上角 + 新增。");
         } else {
             for (Subscription subscription : subscriptions) {
-                subscriptionListAdapter.add(subscription.name + "\n" + subscription.url);
+                subscriptionListAdapter.add(subscription.name);
             }
         }
         subscriptionListAdapter.notifyDataSetChanged();
@@ -776,9 +862,43 @@ public final class MainActivity extends Activity {
         AppPreferences.saveLastSubscriptionId(this, subscription.id);
         channelSubscriptionPicker.setText(subscription.name);
         updateActiveSourceLabel(subscription.name);
+        refreshSubscriptionList();
         editingSubscriptionId = subscription.id;
         statusText.setText("当前订阅: " + subscription.name);
         loadSubscription();
+    }
+
+    private void loadSubscriptionAt(int position) {
+        if (subscriptions.isEmpty() || position < 0 || position >= subscriptions.size()) {
+            clearSubscriptionEditor();
+            return;
+        }
+        selectChannelSubscription(subscriptions.get(position));
+        showTab(true);
+    }
+
+    private void showSubscriptionActions(int position) {
+        if (subscriptions.isEmpty() || position < 0 || position >= subscriptions.size()) {
+            clearSubscriptionEditor();
+            return;
+        }
+        Subscription subscription = subscriptions.get(position);
+        List<String> actions = new ArrayList<>();
+        actions.add("加载订阅");
+        actions.add("编辑");
+        actions.add("删除");
+        showChoicePanel(subscription.name, actions, selected -> {
+            if (selected == 0) {
+                selectChannelSubscription(subscription);
+                showTab(true);
+            } else if (selected == 1) {
+                editingSubscriptionId = subscription.id;
+                showSubscriptionEditor(subscription);
+            } else if (selected == 2) {
+                editingSubscriptionId = subscription.id;
+                deleteEditedSubscription();
+            }
+        });
     }
 
     private void editSubscription(int position) {
@@ -788,28 +908,89 @@ public final class MainActivity extends Activity {
         }
         Subscription subscription = subscriptions.get(position);
         editingSubscriptionId = subscription.id;
-        subscriptionNameInput.setText(subscription.name);
-        subscriptionUrlInput.setText(subscription.url);
-        subscriptionStatusText.setText("正在编辑: " + subscription.name);
+        showSubscriptionEditor(subscription);
     }
 
     private void clearSubscriptionEditor() {
         editingSubscriptionId = "";
-        subscriptionNameInput.setText("");
-        subscriptionUrlInput.setText("");
-        subscriptionStatusText.setText("新建订阅");
+        showSubscriptionEditor(null);
     }
 
+    private void showSubscriptionEditor(Subscription subscription) {
+        if (subscriptionEditorPopup != null) {
+            subscriptionEditorPopup.dismiss();
+        }
+        LinearLayout panel = new LinearLayout(this);
+        panel.setOrientation(LinearLayout.VERTICAL);
+        panel.setPadding(dp(14), dp(14), dp(14), dp(14));
+        panel.setBackground(roundRectWithStroke(colorCard, 22));
+
+        TextView title = new TextView(this);
+        title.setText(subscription == null ? "新增订阅" : "编辑订阅");
+        title.setTextColor(colorText);
+        title.setTextSize(18);
+        title.setTypeface(Typeface.DEFAULT_BOLD);
+        panel.addView(title, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                dp(32)));
+
+        subscriptionNameInput = field("订阅名称，可不填");
+        subscriptionUrlInput = field("订阅链接");
+        subscriptionUrlInput.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
+        if (subscription != null) {
+            subscriptionNameInput.setText(subscription.name);
+            subscriptionUrlInput.setText(subscription.url);
+        }
+        panel.addView(subscriptionNameInput, topMarginParams(dp(46), dp(10)));
+        panel.addView(subscriptionUrlInput, topMarginParams(dp(46), dp(8)));
+
+        LinearLayout actionRow = new LinearLayout(this);
+        actionRow.setOrientation(LinearLayout.HORIZONTAL);
+        actionRow.setGravity(Gravity.CENTER_VERTICAL);
+        actionRow.setPadding(0, dp(10), 0, 0);
+
+        saveSubscriptionButton = pillButton("保存并加载", COLOR_PRIMARY, Color.WHITE);
+        saveSubscriptionButton.setOnClickListener(view -> saveEditedSubscription());
+        deleteSubscriptionButton = pillButton("删除", 0xFF2A2030, COLOR_DANGER);
+        deleteSubscriptionButton.setVisibility(subscription == null ? View.GONE : View.VISIBLE);
+        deleteSubscriptionButton.setOnClickListener(view -> deleteEditedSubscription());
+
+        actionRow.addView(saveSubscriptionButton, weighted(0, 44));
+        actionRow.addView(space(dp(8), 1));
+        actionRow.addView(deleteSubscriptionButton, weighted(0, 44));
+        panel.addView(actionRow);
+
+        subscriptionEditorPopup = new PopupWindow(
+                panel,
+                Math.min(getResources().getDisplayMetrics().widthPixels - dp(28), dp(520)),
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                true);
+        subscriptionEditorPopup.setBackgroundDrawable(roundRectWithStroke(colorCard, 22));
+        subscriptionEditorPopup.setOutsideTouchable(true);
+        subscriptionEditorPopup.setElevation(dp(14));
+        subscriptionEditorPopup.showAtLocation(rootLayout, Gravity.CENTER, 0, 0);
+        subscriptionUrlInput.requestFocus();
+        InputMethodManager manager = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
+        if (manager != null) {
+            subscriptionUrlInput.postDelayed(() -> manager.showSoftInput(subscriptionUrlInput, InputMethodManager.SHOW_IMPLICIT), 180);
+        }
+    }
     private void saveEditedSubscription() {
         hideKeyboard();
+        if (subscriptionUrlInput == null || subscriptionNameInput == null) {
+            return;
+        }
         String url = subscriptionUrlInput.getText().toString().trim();
         if (url.isEmpty()) {
-            subscriptionStatusText.setText("请输入订阅链接");
+            if (subscriptionStatusText != null) {
+                subscriptionStatusText.setText("请输入订阅链接");
+            }
             return;
         }
         Subscription saved = SubscriptionStore.upsert(
                 this,
                 subscriptions,
+                editingSubscriptionId,
                 subscriptionNameInput.getText().toString(),
                 url);
         activeSubscriptionUrl = saved.url;
@@ -818,10 +999,13 @@ public final class MainActivity extends Activity {
         AppPreferences.saveLastSubscriptionId(this, saved.id);
         updateActiveSourceLabel(saved.name);
         reloadSubscriptions(saved.id);
-        subscriptionNameInput.setText(saved.name);
-        subscriptionUrlInput.setText(saved.url);
-        subscriptionStatusText.setText("已保存并切换到: " + saved.name);
+        if (subscriptionStatusText != null) {
+            subscriptionStatusText.setText("已保存并切换到 " + saved.name);
+        }
         statusText.setText("当前订阅: " + saved.name);
+        if (subscriptionEditorPopup != null) {
+            subscriptionEditorPopup.dismiss();
+        }
         showTab(true);
         loadSubscription();
     }
@@ -829,7 +1013,9 @@ public final class MainActivity extends Activity {
     private void deleteEditedSubscription() {
         hideKeyboard();
         if (editingSubscriptionId.isEmpty()) {
-            subscriptionStatusText.setText("请选择要删除的订阅");
+            if (subscriptionStatusText != null) {
+                subscriptionStatusText.setText("请选择要删除的订阅");
+            }
             return;
         }
         Subscription deleted = null;
@@ -840,7 +1026,9 @@ public final class MainActivity extends Activity {
             }
         }
         if (deleted == null) {
-            subscriptionStatusText.setText("订阅不存在");
+            if (subscriptionStatusText != null) {
+                subscriptionStatusText.setText("订阅不存在");
+            }
             return;
         }
         SubscriptionStore.delete(this, subscriptions, deleted.id);
@@ -859,14 +1047,18 @@ public final class MainActivity extends Activity {
             renderChannelList();
             channelCountText.setText("暂无频道");
         }
-        clearSubscriptionEditor();
+        editingSubscriptionId = "";
         reloadSubscriptions("");
-        subscriptionStatusText.setText("已删除: " + deleted.name);
+        if (subscriptionStatusText != null) {
+            subscriptionStatusText.setText("已删除 " + deleted.name);
+        }
+        if (subscriptionEditorPopup != null) {
+            subscriptionEditorPopup.dismiss();
+        }
     }
-
     private void showSubscriptionPicker() {
         if (subscriptions.isEmpty()) {
-            statusText.setText("请先到底部订阅页添加订阅源");
+            statusText.setText("请先在订阅页添加或选择订阅源");
             showTab(false);
             return;
         }
@@ -986,7 +1178,10 @@ public final class MainActivity extends Activity {
         int screenHeight = getResources().getDisplayMetrics().heightPixels;
         int popupWidth = Math.max(dp(240), screenWidth - dp(24));
         popupWidth = Math.min(popupWidth, screenWidth - dp(8));
-        int maxListHeight = Math.max(dp(180), screenHeight - dp(220));
+        int bottomOffset = bottomTabsHost == null || bottomTabsHost.getHeight() == 0
+                ? dp(92)
+                : bottomTabsHost.getHeight() + dp(8);
+        int maxListHeight = Math.max(dp(180), screenHeight - bottomOffset - dp(128));
         int listHeight = Math.min(maxListHeight, Math.max(dp(56), items.size() * dp(54)));
         panel.addView(listView, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
@@ -1005,7 +1200,7 @@ public final class MainActivity extends Activity {
             selection.onSelect(position);
             popup.dismiss();
         });
-        popup.showAtLocation(rootLayout, Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL, 0, dp(76));
+        popup.showAtLocation(rootLayout, Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL, 0, bottomOffset);
     }
 
     private boolean loadCachedSubscription(String url) {
@@ -1111,7 +1306,7 @@ public final class MainActivity extends Activity {
                 }
             }, 15000);
             MediaItem mediaItem = buildMediaItem(channel.url);
-            player.setMediaItem(mediaItem);
+            player.setMediaSource(buildMediaSourceFactory(channel).createMediaSource(mediaItem));
             player.prepare();
             player.play();
             updateKeepScreenOn();
@@ -1121,13 +1316,33 @@ public final class MainActivity extends Activity {
         }
     }
 
+    private DefaultMediaSourceFactory buildMediaSourceFactory(Channel channel) {
+        String userAgent = channel.userAgent.isEmpty()
+                ? "WagonLink/" + BuildConfig.VERSION_NAME + " Android"
+                : channel.userAgent;
+        DefaultHttpDataSource.Factory httpFactory = new DefaultHttpDataSource.Factory()
+                .setAllowCrossProtocolRedirects(true)
+                .setUserAgent(userAgent);
+        Map<String, String> headers = new HashMap<>();
+        if (!channel.referer.isEmpty()) {
+            headers.put("Referer", channel.referer);
+        }
+        if (!headers.isEmpty()) {
+            httpFactory.setDefaultRequestProperties(headers);
+        }
+        return new DefaultMediaSourceFactory(this).setDataSourceFactory(httpFactory);
+    }
+
     private MediaItem buildMediaItem(String url) {
         Uri uri = Uri.parse(url);
         String lower = url == null ? "" : url.trim().toLowerCase(Locale.ROOT);
         MediaItem.Builder builder = new MediaItem.Builder().setUri(uri);
-        if (lower.endsWith(".mpd")) {
+        if (lower.endsWith(".mpd") || lower.contains(".mpd?")) {
             builder.setMimeType(MimeTypes.APPLICATION_MPD);
         } else if (lower.endsWith(".m3u8")
+                || lower.contains(".m3u8?")
+                || lower.contains("m3u8")
+                || lower.contains(".php")
                 || lower.contains("live.catvod.com/?id=")) {
             builder.setMimeType(MimeTypes.APPLICATION_M3U8);
         }
@@ -1138,35 +1353,66 @@ public final class MainActivity extends Activity {
         if (playerFeedbackView == null || videoProgressBar == null || playerStatusText == null) {
             return;
         }
+        videoFeedbackRequested = true;
+        videoFeedbackLoading = true;
         videoProgressBar.setVisibility(View.VISIBLE);
         playerStatusText.setText(message == null || message.trim().isEmpty() ? "正在连接..." : message);
-        playerFeedbackView.setVisibility(View.VISIBLE);
+        updateVideoFeedbackVisibility();
     }
 
     private void showVideoError(String message) {
         if (playerFeedbackView == null || videoProgressBar == null || playerStatusText == null) {
             return;
         }
+        videoFeedbackRequested = true;
+        videoFeedbackLoading = false;
         videoProgressBar.setVisibility(View.GONE);
         playerStatusText.setText(message == null || message.trim().isEmpty() ? "播放失败" : message);
-        playerFeedbackView.setVisibility(View.VISIBLE);
+        updateVideoFeedbackVisibility();
     }
 
     private void hideVideoFeedback() {
+        videoFeedbackRequested = false;
+        videoFeedbackLoading = false;
         if (playerFeedbackView != null) {
             playerFeedbackView.setVisibility(View.GONE);
         }
+    }
+
+    private void updateVideoFeedbackVisibility() {
+        if (playerFeedbackView == null || videoProgressBar == null) {
+            return;
+        }
+        videoProgressBar.setVisibility(videoFeedbackLoading ? View.VISIBLE : View.GONE);
+        boolean visible = videoFeedbackRequested
+                && (!isFullscreen || (fullscreenControlsVisible && !fullscreenLocked));
+        playerFeedbackView.setVisibility(visible ? View.VISIBLE : View.GONE);
     }
 
     private void updatePlayerInfoOverlay() {
         if (fullscreenInfoText == null) {
             return;
         }
-        if (!isFullscreen || selectedChannelName.isEmpty()) {
+        String source = activeSourceText == null ? "" : activeSourceText.getText().toString().trim();
+        String normalInfo;
+        if (!selectedChannelName.isEmpty()) {
+            normalInfo = selectedChannelName;
+        } else if (source.isEmpty() || "未选择订阅".equals(source)) {
+            normalInfo = "选择频道后开始播放";
+        } else {
+            normalInfo = source;
+        }
+        if (playerInfoText != null) {
+            playerInfoText.setText(normalInfo);
+            playerInfoText.setVisibility(isFullscreen ? View.GONE : View.VISIBLE);
+        }
+        if (!isFullscreen
+                || selectedChannelName.isEmpty()
+                || !fullscreenControlsVisible
+                || fullscreenLocked) {
             fullscreenInfoText.setVisibility(View.GONE);
             return;
         }
-        String source = activeSourceText == null ? "" : activeSourceText.getText().toString().trim();
         String info = source.isEmpty() ? selectedChannelName : source + "  |  " + selectedChannelName;
         fullscreenInfoText.setText(info);
         fullscreenInfoText.setVisibility(View.VISIBLE);
@@ -1209,19 +1455,24 @@ public final class MainActivity extends Activity {
 
     private View channelCard(Channel channel) {
         LinearLayout card = new LinearLayout(this);
-        card.setOrientation(LinearLayout.VERTICAL);
+        card.setOrientation(LinearLayout.HORIZONTAL);
         card.setGravity(Gravity.CENTER_VERTICAL);
-        card.setPadding(dp(14), dp(8), dp(14), dp(8));
+        card.setPadding(dp(12), dp(8), dp(10), dp(8));
         boolean selected = channel.url.equals(selectedChannelUrl);
         card.setBackground(selected
-                ? roundRectWithStroke(0x1A2F7CFF, 16, COLOR_PRIMARY, 2)
-                : roundRectWithStroke(colorCard, 16));
+                ? roundRectWithStroke(0x262F7CFF, 18, COLOR_PRIMARY, 2)
+                : roundRectWithStroke(colorCard, 18));
         card.setOnClickListener(view -> playChannel(channel));
+
+        LinearLayout textColumn = new LinearLayout(this);
+        textColumn.setOrientation(LinearLayout.VERTICAL);
+        textColumn.setGravity(Gravity.CENTER_VERTICAL);
+        textColumn.setPadding(dp(4), 0, dp(8), 0);
 
         TextView title = new TextView(this);
         title.setText(channel.name);
         title.setTextColor(selected ? COLOR_PRIMARY : colorText);
-        title.setTextSize(17);
+        title.setTextSize(16);
         title.setTypeface(Typeface.DEFAULT_BOLD);
         title.setSingleLine(true);
         title.setEllipsize(TextUtils.TruncateAt.END);
@@ -1229,20 +1480,36 @@ public final class MainActivity extends Activity {
         TextView detail = new TextView(this);
         detail.setText(selected ? "正在播放 | " + channel.group : channel.group);
         detail.setTextColor(selected ? COLOR_PRIMARY : colorMuted);
-        detail.setTextSize(13);
+        detail.setTextSize(12);
         detail.setSingleLine(true);
         detail.setEllipsize(TextUtils.TruncateAt.END);
 
-        card.addView(title, new LinearLayout.LayoutParams(
+        textColumn.addView(title, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
-                dp(24)));
-        card.addView(detail, new LinearLayout.LayoutParams(
+                dp(23)));
+        textColumn.addView(detail, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
-                dp(20)));
+                dp(19)));
+        card.addView(textColumn, new LinearLayout.LayoutParams(
+                0,
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                1));
+
+        TextView state = new TextView(this);
+        state.setText(selected ? "播放中" : "播放");
+        state.setTextColor(selected ? Color.WHITE : COLOR_PRIMARY);
+        state.setTextSize(12);
+        state.setTypeface(Typeface.DEFAULT_BOLD);
+        state.setGravity(Gravity.CENTER);
+        state.setSingleLine(true);
+        state.setBackground(selected
+                ? roundRect(COLOR_PRIMARY, 16)
+                : roundRectWithStroke(0xFFEAF1FF, 16, COLOR_PRIMARY, 1));
+        card.addView(state, new LinearLayout.LayoutParams(dp(58), dp(34)));
 
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
-                dp(70));
+                dp(66));
         params.setMargins(dp(10), dp(4), dp(10), dp(4));
         card.setLayoutParams(params);
         return card;
@@ -1263,12 +1530,121 @@ public final class MainActivity extends Activity {
     private void setLoading(boolean loading) {
         progressBar.setVisibility(loading ? View.VISIBLE : View.GONE);
         refreshButton.setEnabled(!loading);
-        saveSubscriptionButton.setEnabled(!loading);
-        deleteSubscriptionButton.setEnabled(!loading);
+        if (saveSubscriptionButton != null) {
+            saveSubscriptionButton.setEnabled(!loading);
+        }
+        if (deleteSubscriptionButton != null) {
+            deleteSubscriptionButton.setEnabled(!loading);
+        }
+    }
+
+    private void handlePlayerSurfaceTap() {
+        hideKeyboard();
+        if (!isFullscreen) {
+            return;
+        }
+        if (fullscreenLocked) {
+            setFullscreenControlsVisible(true);
+            return;
+        }
+        setFullscreenControlsVisible(!fullscreenControlsVisible);
+    }
+
+    private void setFullscreenControlsVisible(boolean visible) {
+        if (!isFullscreen) {
+            return;
+        }
+        fullscreenControlsVisible = visible;
+        applyFullscreenControlState();
+        mainHandler.removeCallbacks(hideFullscreenControlsRunnable);
+        if (visible) {
+            mainHandler.postDelayed(hideFullscreenControlsRunnable, fullscreenLocked ? 2500 : 5000);
+        }
+    }
+
+    private void lockFullscreenControls() {
+        if (!isFullscreen) {
+            return;
+        }
+        fullscreenLocked = true;
+        fullscreenControlsVisible = true;
+        applyFullscreenControlState();
+        mainHandler.removeCallbacks(hideFullscreenControlsRunnable);
+        mainHandler.postDelayed(hideFullscreenControlsRunnable, 2500);
+    }
+
+    private void unlockFullscreenControls() {
+        if (!isFullscreen) {
+            return;
+        }
+        fullscreenLocked = false;
+        fullscreenControlsVisible = true;
+        applyFullscreenControlState();
+        mainHandler.removeCallbacks(hideFullscreenControlsRunnable);
+        mainHandler.postDelayed(hideFullscreenControlsRunnable, 5000);
+    }
+
+    private void applyFullscreenControlState() {
+        if (playerView == null || fullscreenButton == null) {
+            return;
+        }
+        if (!isFullscreen) {
+            fullscreenControlsVisible = false;
+            fullscreenLocked = false;
+            fullscreenButton.setVisibility(View.VISIBLE);
+            if (lockButton != null) {
+                lockButton.setVisibility(View.GONE);
+            }
+            if (unlockButton != null) {
+                unlockButton.setVisibility(View.GONE);
+            }
+            playerView.setUseController(true);
+            playerView.setControllerAutoShow(true);
+            updatePlayerInfoOverlay();
+            updateVideoFeedbackVisibility();
+            return;
+        }
+
+        playerView.setControllerAutoShow(false);
+        if (fullscreenLocked) {
+            fullscreenButton.setVisibility(View.GONE);
+            fullscreenInfoText.setVisibility(View.GONE);
+            if (lockButton != null) {
+                lockButton.setVisibility(View.GONE);
+            }
+            if (unlockButton != null) {
+                unlockButton.setVisibility(fullscreenControlsVisible ? View.VISIBLE : View.GONE);
+            }
+            playerView.hideController();
+            playerView.setUseController(false);
+            updatePlayerInfoOverlay();
+            updateVideoFeedbackVisibility();
+            return;
+        }
+
+        fullscreenButton.setVisibility(fullscreenControlsVisible ? View.VISIBLE : View.GONE);
+        if (lockButton != null) {
+            lockButton.setVisibility(fullscreenControlsVisible ? View.VISIBLE : View.GONE);
+        }
+        if (unlockButton != null) {
+            unlockButton.setVisibility(View.GONE);
+        }
+        if (fullscreenControlsVisible) {
+            playerView.setUseController(true);
+            playerView.showController();
+        } else {
+            playerView.hideController();
+            playerView.setUseController(false);
+        }
+        updatePlayerInfoOverlay();
+        updateVideoFeedbackVisibility();
     }
 
     private void setFullscreen(boolean fullscreen) {
         isFullscreen = fullscreen;
+        fullscreenControlsVisible = false;
+        fullscreenLocked = false;
+        mainHandler.removeCallbacks(hideFullscreenControlsRunnable);
         fullscreenButton.setText(fullscreen ? "退出" : "全屏");
         channelTopBar.setVisibility(fullscreen ? View.GONE : View.VISIBLE);
         channelControls.setVisibility(fullscreen ? View.GONE : View.VISIBLE);
@@ -1282,23 +1658,22 @@ public final class MainActivity extends Activity {
 
         LinearLayout.LayoutParams params = (LinearLayout.LayoutParams) playerContainer.getLayoutParams();
         params.width = ViewGroup.LayoutParams.MATCH_PARENT;
-        params.height = fullscreen ? ViewGroup.LayoutParams.MATCH_PARENT : dp(184);
+        params.height = fullscreen ? ViewGroup.LayoutParams.MATCH_PARENT : dp(166);
         params.setMargins(
                 fullscreen ? 0 : dp(10),
                 fullscreen ? 0 : dp(4),
                 fullscreen ? 0 : dp(10),
                 fullscreen ? 0 : dp(8));
         playerContainer.setLayoutParams(params);
+        updateFullscreenOverlayLayout(fullscreen);
 
         Window window = getWindow();
         if (fullscreen) {
             setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE);
-            window.addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
+            window.clearFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
             window.getDecorView().setSystemUiVisibility(
-                    View.SYSTEM_UI_FLAG_FULLSCREEN
-                            | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                    View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
                             | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
-                            | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
                             | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
                             | View.SYSTEM_UI_FLAG_LAYOUT_STABLE);
         } else {
@@ -1306,13 +1681,51 @@ public final class MainActivity extends Activity {
             window.clearFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
             configureWindow();
         }
+        applyFullscreenControlState();
+        playerContainer.post(() -> updateFullscreenOverlayLayout(isFullscreen));
+        if (fullscreen) {
+            playerContainer.postDelayed(() -> {
+                if (isFullscreen && !fullscreenLocked) {
+                    setFullscreenControlsVisible(false);
+                }
+            }, 250);
+        }
+    }
+
+    private void updateFullscreenOverlayLayout(boolean fullscreen) {
+        if (playerContainer == null || fullscreenButton == null || fullscreenInfoText == null) {
+            return;
+        }
+        int top = fullscreen ? statusBarInsetTop() + dp(10) : dp(10);
+
+        FrameLayout.LayoutParams buttonParams = (FrameLayout.LayoutParams) fullscreenButton.getLayoutParams();
+        buttonParams.gravity = Gravity.END | Gravity.TOP;
+        buttonParams.setMargins(0, top, dp(12), 0);
+        fullscreenButton.setLayoutParams(buttonParams);
+
+        FrameLayout.LayoutParams infoParams = (FrameLayout.LayoutParams) fullscreenInfoText.getLayoutParams();
+        infoParams.gravity = Gravity.START | Gravity.TOP;
+        infoParams.setMargins(dp(12), top, dp(110), 0);
+        fullscreenInfoText.setLayoutParams(infoParams);
+
+        if (playerInfoText != null) {
+            FrameLayout.LayoutParams normalInfoParams = (FrameLayout.LayoutParams) playerInfoText.getLayoutParams();
+            normalInfoParams.gravity = Gravity.START | Gravity.TOP;
+            normalInfoParams.setMargins(dp(10), dp(10), dp(100), 0);
+            playerInfoText.setLayoutParams(normalInfoParams);
+        }
+    }
+
+    private int statusBarInsetTop() {
+        WindowInsets insets = getWindow().getDecorView().getRootWindowInsets();
+        if (insets == null) {
+            return dp(24);
+        }
+        return insets.getInsets(WindowInsets.Type.statusBars()).top;
     }
 
     private void updateKeepScreenOn() {
-        boolean playingOrBuffering = player != null
-                && player.getPlayWhenReady()
-                && (player.getPlaybackState() == Player.STATE_READY
-                || player.getPlaybackState() == Player.STATE_BUFFERING);
+        boolean playingOrBuffering = isPlaybackActive();
         boolean keepOn = isFullscreen || playingOrBuffering;
         Window window = getWindow();
         if (keepOn) {
@@ -1328,6 +1741,13 @@ public final class MainActivity extends Activity {
         }
     }
 
+    private boolean isPlaybackActive() {
+        return player != null
+                && player.getPlayWhenReady()
+                && (player.getPlaybackState() == Player.STATE_READY
+                || player.getPlaybackState() == Player.STATE_BUFFERING);
+    }
+
     private EditText field(String hint) {
         EditText field = new EditText(this);
         field.setSingleLine(true);
@@ -1336,7 +1756,7 @@ public final class MainActivity extends Activity {
         field.setTextColor(colorText);
         field.setTextSize(14);
         field.setGravity(Gravity.CENTER_VERTICAL);
-        field.setMinHeight(dp(52));
+        field.setMinHeight(dp(44));
         field.setPadding(dp(12), 0, dp(12), 0);
         field.setBackground(roundRectWithStroke(colorField, 14));
         return field;
@@ -1349,7 +1769,7 @@ public final class MainActivity extends Activity {
         view.setTextSize(14);
         view.setGravity(Gravity.CENTER_VERTICAL);
         view.setSingleLine(true);
-        view.setMinHeight(dp(52));
+        view.setMinHeight(dp(44));
         view.setPadding(dp(14), 0, dp(14), 0);
         view.setBackground(roundRectWithStroke(colorField, 14));
         return view;
@@ -1358,11 +1778,11 @@ public final class MainActivity extends Activity {
     private TextView tabButton(String text) {
         TextView view = new TextView(this);
         view.setText(text);
-        view.setTextSize(15);
+        view.setTextSize(14);
         view.setTypeface(Typeface.DEFAULT_BOLD);
         view.setGravity(Gravity.CENTER);
         view.setSingleLine(true);
-        view.setMinHeight(dp(48));
+        view.setMinHeight(dp(46));
         return view;
     }
 
@@ -1460,6 +1880,17 @@ public final class MainActivity extends Activity {
     }
 
     @Override
+    public void onConfigurationChanged(Configuration newConfig) {
+        super.onConfigurationChanged(newConfig);
+        if (AppPreferences.THEME_SYSTEM.equals(themeMode) && !isPlaybackActive()) {
+            recreate();
+            return;
+        }
+        resolveThemeColors();
+        configureWindow();
+    }
+
+    @Override
     protected void onDestroy() {
         destroyed = true;
         getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
@@ -1477,7 +1908,7 @@ public final class MainActivity extends Activity {
             setFullscreen(false);
             return;
         }
-        if (subscriptionPage.getVisibility() == View.VISIBLE) {
+        if (subscriptionPage.getVisibility() == View.VISIBLE || settingsPage.getVisibility() == View.VISIBLE) {
             showTab(true);
             return;
         }
@@ -1561,8 +1992,13 @@ public final class MainActivity extends Activity {
                         ViewGroup.LayoutParams.WRAP_CONTENT));
             }
             view.setText(getItem(position));
-            view.setTextColor(colorText);
-            view.setBackground(roundRectWithStroke(colorCard, 16));
+            boolean selected = position < subscriptions.size()
+                    && subscriptions.get(position).id.equals(activeSubscriptionId);
+            view.setTextColor(selected ? COLOR_PRIMARY : colorText);
+            view.setTypeface(selected ? Typeface.DEFAULT_BOLD : Typeface.DEFAULT);
+            view.setBackground(selected
+                    ? roundRectWithStroke(0x262F7CFF, 18, COLOR_PRIMARY, 2)
+                    : roundRectWithStroke(colorCard, 18));
             view.setSingleLine(false);
             return container;
         }

@@ -6,10 +6,11 @@ WagonLink 是一个 Android 直播 / IPTV 播放器，用来加载用户自己�
 
 ## 下载
 
-当前版本：`3.2`
+当前版本：`3.7`
 
-- GitHub 仓库内下载：[WagonLink-3.2-debug.apk](https://github.com/IsBEICHEN/WagonLink/blob/main/releases/WagonLink-3.2-debug.apk)
-- 直接下载链接：[WagonLink-3.2-debug.apk](https://raw.githubusercontent.com/IsBEICHEN/WagonLink/main/releases/WagonLink-3.2-debug.apk)
+- GitHub 仓库内下载：[WagonLink-3.7-debug.apk](https://github.com/IsBEICHEN/WagonLink/blob/main/releases/WagonLink-3.7-debug.apk)
+- 直接下载链接：[WagonLink-3.7-debug.apk](https://raw.githubusercontent.com/IsBEICHEN/WagonLink/main/releases/WagonLink-3.7-debug.apk)
+- 历史版本记录：[CHANGELOG.md](CHANGELOG.md)
 
 说明：
 
@@ -25,11 +26,14 @@ WagonLink 是一个 Android 直播 / IPTV 播放器，用来加载用户自己�
 - 支持常见 JSON 频道列表。
 - 支持频道分组筛选和频道搜索。
 - 支持保存多个订阅，并在频道页快速切换。
+- 支持点按订阅直接加载，长按订阅进行加载、编辑或删除。
 - 支持自动加载上次选择的订阅。
 - 支持解析成功后的频道缓存，减少重复加载订阅。
+- 支持识别 M3U 里的 `http-user-agent`、`http-referrer` 等播放请求头。
 - 支持 HLS、DASH、HTTP progressive、RTSP 等播放类型。
 - 对没有 `.m3u8` 后缀但实际是 HLS 的部分直播网关地址做了兼容处理。
 - 使用毛玻璃风格界面、圆角底部菜单和页面切换动画。
+- 支持全屏播放时隐藏控件、点击唤出控件、锁定屏幕防误触，并保持屏幕常亮。
 
 ## 构建
 

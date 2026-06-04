@@ -42,11 +42,19 @@ final class SubscriptionStore {
     }
 
     static Subscription upsert(Context context, List<Subscription> current, String name, String url) {
+        return upsert(context, current, "", name, url);
+    }
+
+    static Subscription upsert(Context context, List<Subscription> current, String editingId, String name, String url) {
         String trimmedUrl = url == null ? "" : url.trim();
+        String trimmedId = editingId == null ? "" : editingId.trim();
         Subscription next = null;
         List<Subscription> updated = new ArrayList<>();
         for (Subscription subscription : current) {
-            if (subscription.url.equals(trimmedUrl)) {
+            boolean sameSubscription = !trimmedId.isEmpty()
+                    ? subscription.id.equals(trimmedId)
+                    : subscription.url.equals(trimmedUrl);
+            if (sameSubscription) {
                 next = new Subscription(subscription.id, name, trimmedUrl);
                 updated.add(next);
             } else {

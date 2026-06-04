@@ -12,6 +12,7 @@ import java.util.List;
 final class ChannelCache {
     private static final String PREFS = "wagonlink_channel_cache";
     private static final String KEY_PREFIX = "subscription_";
+    private static final int SCHEMA_VERSION = 2;
 
     private ChannelCache() {
     }
@@ -27,6 +28,9 @@ final class ChannelCache {
         }
         try {
             JSONObject root = new JSONObject(raw);
+            if (root.optInt("schemaVersion", 1) < SCHEMA_VERSION) {
+                return null;
+            }
             String cachedUrl = root.optString("url", "");
             if (!cachedUrl.equals(subscriptionUrl)) {
                 return null;
@@ -49,7 +53,9 @@ final class ChannelCache {
                         object.optString("name", ""),
                         url,
                         object.optString("group", ""),
-                        object.optString("logo", "")));
+                        object.optString("logo", ""),
+                        object.optString("userAgent", ""),
+                        object.optString("referer", "")));
             }
             return channels;
         } catch (Exception ignored) {
@@ -69,6 +75,8 @@ final class ChannelCache {
                 object.put("url", channel.url);
                 object.put("group", channel.group);
                 object.put("logo", channel.logo);
+                object.put("userAgent", channel.userAgent);
+                object.put("referer", channel.referer);
                 array.put(object);
             } catch (Exception ignored) {
             }
@@ -76,6 +84,7 @@ final class ChannelCache {
         JSONObject root = new JSONObject();
         try {
             root.put("url", subscriptionUrl);
+            root.put("schemaVersion", SCHEMA_VERSION);
             root.put("savedAt", System.currentTimeMillis());
             root.put("channels", array);
         } catch (Exception ignored) {

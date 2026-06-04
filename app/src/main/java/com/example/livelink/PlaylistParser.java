@@ -67,6 +67,8 @@ final class PlaylistParser {
         String pendingName = "";
         String pendingGroup = "";
         String pendingLogo = "";
+        String pendingUserAgent = "";
+        String pendingReferer = "";
 
         for (String rawLine : text.split("\\r?\\n")) {
             String line = rawLine.trim();
@@ -78,6 +80,23 @@ final class PlaylistParser {
                 pendingName = firstNonEmpty(attribute(line, "tvg-name"), nameAfterComma(line));
                 pendingGroup = attribute(line, "group-title");
                 pendingLogo = attribute(line, "tvg-logo");
+                pendingUserAgent = firstNonEmpty(attribute(line, "http-user-agent"), attribute(line, "user-agent"));
+                pendingReferer = firstNonEmpty(attribute(line, "http-referrer"), attribute(line, "referer"));
+                continue;
+            }
+
+            if (line.startsWith("#EXTVLCOPT:")) {
+                String option = line.substring("#EXTVLCOPT:".length()).trim();
+                int equals = option.indexOf('=');
+                if (equals > 0) {
+                    String key = option.substring(0, equals).trim();
+                    String value = option.substring(equals + 1).trim();
+                    if ("http-user-agent".equalsIgnoreCase(key)) {
+                        pendingUserAgent = value;
+                    } else if ("http-referrer".equalsIgnoreCase(key) || "http-referer".equalsIgnoreCase(key)) {
+                        pendingReferer = value;
+                    }
+                }
                 continue;
             }
 
@@ -88,10 +107,12 @@ final class PlaylistParser {
             if (looksPlayableUrl(line)) {
                 String url = resolve(baseUrl, line);
                 String name = firstNonEmpty(pendingName, deriveName(url));
-                channels.add(new Channel(name, url, pendingGroup, pendingLogo));
+                channels.add(new Channel(name, url, pendingGroup, pendingLogo, pendingUserAgent, pendingReferer));
                 pendingName = "";
                 pendingGroup = "";
                 pendingLogo = "";
+                pendingUserAgent = "";
+                pendingReferer = "";
             }
         }
         return channels;
