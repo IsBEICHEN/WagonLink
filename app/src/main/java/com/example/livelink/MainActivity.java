@@ -2,20 +2,29 @@ package com.example.livelink;
 
 import android.app.Activity;
 import android.content.Context;
+import android.content.Intent;
 import android.content.res.Configuration;
 import android.content.pm.ActivityInfo;
+import android.graphics.Canvas;
 import android.graphics.Color;
+import android.graphics.Paint;
+import android.graphics.Path;
+import android.graphics.PixelFormat;
+import android.graphics.RectF;
 import android.graphics.Typeface;
+import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.provider.Settings;
 import android.text.Editable;
 import android.text.InputType;
 import android.text.TextUtils;
 import android.text.TextWatcher;
 import android.view.Gravity;
+import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.Window;
@@ -57,6 +66,7 @@ import java.util.concurrent.Executors;
 public final class MainActivity extends Activity {
     private static final int COLOR_PRIMARY = 0xFF2F7CFF;
     private static final int COLOR_DANGER = 0xFFE85D75;
+    private static final int FULLSCREEN_CONTROLS_TIMEOUT_MS = 5000;
     private int colorAppBg;
     private int colorCard;
     private int colorField;
@@ -112,8 +122,13 @@ public final class MainActivity extends Activity {
     private Button deleteSubscriptionButton;
     private TextView themePicker;
     private Switch glassEffectSwitch;
+    private Switch floatingWindowSwitch;
     private TextView subscriptionStatusText;
     private PopupWindow subscriptionEditorPopup;
+    private WindowManager overlayWindowManager;
+    private View floatingWindowView;
+    private PlayerView floatingPlayerView;
+    private WindowManager.LayoutParams floatingWindowParams;
     private boolean destroyed;
     private boolean isFullscreen;
     private boolean fullscreenControlsVisible;
@@ -121,6 +136,9 @@ public final class MainActivity extends Activity {
     private boolean videoFeedbackRequested;
     private boolean videoFeedbackLoading;
     private boolean tabLayoutReady;
+    private boolean floatingWindowEnabled;
+    private boolean requestingOverlayPermission;
+    private boolean floatingPlayerAttached;
     private int currentTabIndex;
     private int playRequestToken;
     private String activeSubscriptionUrl = "";
@@ -136,12 +154,18 @@ public final class MainActivity extends Activity {
             setFullscreenControlsVisible(false);
         }
     };
+    private final Runnable enterFloatingWindowRunnable = this::enterFloatingWindowIfNeeded;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         themeMode = AppPreferences.loadTheme(this);
         glassEffectEnabled = true;
+        floatingWindowEnabled = AppPreferences.loadFloatingWindow(this);
+        if (floatingWindowEnabled && !canDrawOverlayWindow()) {
+            floatingWindowEnabled = false;
+            AppPreferences.saveFloatingWindow(this, false);
+        }
         AppPreferences.saveGlassEffect(this, true);
         resolveThemeColors();
         configureWindow();
@@ -355,7 +379,7 @@ public final class MainActivity extends Activity {
         playerView.setPlayer(player);
         playerView.setUseController(true);
         playerView.setControllerAutoShow(true);
-        playerView.setControllerShowTimeoutMs(4000);
+        playerView.setControllerShowTimeoutMs(FULLSCREEN_CONTROLS_TIMEOUT_MS);
         playerView.setOnClickListener(view -> handlePlayerSurfaceTap());
         playerView.setBackgroundColor(Color.BLACK);
         playerContainer.addView(playerView, fillFrame());
@@ -367,8 +391,9 @@ public final class MainActivity extends Activity {
         playerInfoText.setTypeface(Typeface.DEFAULT_BOLD);
         playerInfoText.setSingleLine(true);
         playerInfoText.setEllipsize(TextUtils.TruncateAt.END);
-        playerInfoText.setPadding(dp(12), 0, dp(12), 0);
-        playerInfoText.setBackground(roundRect(0xAA111827, 16));
+        playerInfoText.setPadding(dp(4), 0, dp(4), 0);
+        playerInfoText.setShadowLayer(dp(2), 0, dp(1), 0xCC000000);
+        playerInfoText.setBackground(null);
         FrameLayout.LayoutParams playerInfoParams = new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT,
                 dp(36),
@@ -407,12 +432,14 @@ public final class MainActivity extends Activity {
 
         fullscreenInfoText = new TextView(this);
         fullscreenInfoText.setTextColor(Color.WHITE);
-        fullscreenInfoText.setTextSize(13);
+        fullscreenInfoText.setTextSize(12);
         fullscreenInfoText.setTypeface(Typeface.DEFAULT_BOLD);
         fullscreenInfoText.setSingleLine(true);
         fullscreenInfoText.setEllipsize(TextUtils.TruncateAt.END);
-        fullscreenInfoText.setPadding(dp(12), 0, dp(12), 0);
-        fullscreenInfoText.setBackground(roundRect(0xAA111827, 16));
+        fullscreenInfoText.setGravity(Gravity.CENTER_VERTICAL | Gravity.START);
+        fullscreenInfoText.setPadding(dp(4), 0, dp(4), 0);
+        fullscreenInfoText.setShadowLayer(dp(2), 0, dp(1), 0xCC000000);
+        fullscreenInfoText.setBackground(null);
         fullscreenInfoText.setVisibility(View.GONE);
         FrameLayout.LayoutParams infoParams = new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT,
@@ -421,33 +448,31 @@ public final class MainActivity extends Activity {
         infoParams.setMargins(dp(10), dp(10), dp(100), 0);
         playerContainer.addView(fullscreenInfoText, infoParams);
 
-        fullscreenButton = pillButton("全屏", 0xCC111827, Color.WHITE);
-        fullscreenButton.setTextSize(13);
+        fullscreenButton = iconButton(new FullscreenIconDrawable(false, dp(24), Color.WHITE));
+        fullscreenButton.setContentDescription("全屏");
         fullscreenButton.setOnClickListener(view -> setFullscreen(!isFullscreen));
         FrameLayout.LayoutParams fullscreenParams = new FrameLayout.LayoutParams(
-                dp(78),
-                dp(40),
-                Gravity.END | Gravity.TOP);
-        fullscreenParams.setMargins(0, dp(10), dp(10), 0);
+                dp(44),
+                dp(44),
+                Gravity.END | Gravity.BOTTOM);
+        fullscreenParams.setMargins(0, 0, dp(12), dp(12));
         playerContainer.addView(fullscreenButton, fullscreenParams);
 
-        lockButton = pillButton("锁定", 0xCC111827, Color.WHITE);
-        lockButton.setTextSize(13);
+        lockButton = lockIconButton(false);
         lockButton.setVisibility(View.GONE);
         lockButton.setOnClickListener(view -> lockFullscreenControls());
         FrameLayout.LayoutParams lockParams = new FrameLayout.LayoutParams(
-                dp(78),
-                dp(40),
+                dp(44),
+                dp(44),
                 Gravity.START | Gravity.CENTER_VERTICAL);
         lockParams.setMargins(dp(12), 0, 0, 0);
         playerContainer.addView(lockButton, lockParams);
 
-        unlockButton = pillButton("解锁", 0xDD111827, Color.WHITE);
-        unlockButton.setTextSize(13);
+        unlockButton = lockIconButton(true);
         unlockButton.setVisibility(View.GONE);
         unlockButton.setOnClickListener(view -> unlockFullscreenControls());
         FrameLayout.LayoutParams unlockParams = new FrameLayout.LayoutParams(
-                dp(86),
+                dp(44),
                 dp(44),
                 Gravity.START | Gravity.CENTER_VERTICAL);
         unlockParams.setMargins(dp(16), 0, 0, 0);
@@ -655,8 +680,70 @@ public final class MainActivity extends Activity {
         page.addView(appearance, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        LinearLayout playback = new LinearLayout(this);
+        playback.setOrientation(LinearLayout.VERTICAL);
+        playback.setPadding(dp(14), dp(12), dp(14), dp(12));
+        playback.setBackground(roundRectWithStroke(colorCard, 22));
+        playback.setElevation(glassEffectEnabled ? dp(8) : 0);
+
+        TextView playbackTitle = new TextView(this);
+        playbackTitle.setText("播放");
+        playbackTitle.setTextColor(colorText);
+        playbackTitle.setTextSize(16);
+        playbackTitle.setTypeface(Typeface.DEFAULT_BOLD);
+        playback.addView(playbackTitle);
+
+        playback.addView(buildFloatingWindowRow(), topMarginParams(dp(52), dp(8)));
+
+        LinearLayout.LayoutParams playbackParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT);
+        playbackParams.setMargins(0, dp(12), 0, 0);
+        page.addView(playback, playbackParams);
         return page;
     }
+
+    private View buildFloatingWindowRow() {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(dp(12), 0, dp(10), 0);
+        row.setBackground(roundRectWithStroke(colorField, 14));
+
+        LinearLayout copy = new LinearLayout(this);
+        copy.setOrientation(LinearLayout.VERTICAL);
+        copy.setGravity(Gravity.CENTER_VERTICAL);
+
+        TextView label = new TextView(this);
+        label.setText("返回时自动进入悬浮窗");
+        label.setTextColor(colorText);
+        label.setTextSize(14);
+        label.setTypeface(Typeface.DEFAULT_BOLD);
+        label.setSingleLine(true);
+
+        TextView detail = smallText("开启后，播放中返回桌面会自动显示小窗");
+        detail.setSingleLine(true);
+
+        copy.addView(label, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                dp(24)));
+        copy.addView(detail, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                dp(20)));
+
+        floatingWindowSwitch = new Switch(this);
+        floatingWindowSwitch.setText("");
+        floatingWindowSwitch.setChecked(floatingWindowEnabled && canDrawOverlayWindow());
+        floatingWindowSwitch.setOnCheckedChangeListener((buttonView, checked) -> setFloatingWindowEnabled(checked, true));
+
+        row.addView(copy, weighted(0, 48));
+        row.addView(floatingWindowSwitch, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT));
+        return row;
+    }
+
     private View buildGlassEffectRow() {
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
@@ -1558,7 +1645,7 @@ public final class MainActivity extends Activity {
         applyFullscreenControlState();
         mainHandler.removeCallbacks(hideFullscreenControlsRunnable);
         if (visible) {
-            mainHandler.postDelayed(hideFullscreenControlsRunnable, fullscreenLocked ? 2500 : 5000);
+            mainHandler.postDelayed(hideFullscreenControlsRunnable, FULLSCREEN_CONTROLS_TIMEOUT_MS);
         }
     }
 
@@ -1568,9 +1655,10 @@ public final class MainActivity extends Activity {
         }
         fullscreenLocked = true;
         fullscreenControlsVisible = true;
+        hideVideoFeedback();
         applyFullscreenControlState();
         mainHandler.removeCallbacks(hideFullscreenControlsRunnable);
-        mainHandler.postDelayed(hideFullscreenControlsRunnable, 2500);
+        mainHandler.postDelayed(hideFullscreenControlsRunnable, FULLSCREEN_CONTROLS_TIMEOUT_MS);
     }
 
     private void unlockFullscreenControls() {
@@ -1581,7 +1669,7 @@ public final class MainActivity extends Activity {
         fullscreenControlsVisible = true;
         applyFullscreenControlState();
         mainHandler.removeCallbacks(hideFullscreenControlsRunnable);
-        mainHandler.postDelayed(hideFullscreenControlsRunnable, 5000);
+        mainHandler.postDelayed(hideFullscreenControlsRunnable, FULLSCREEN_CONTROLS_TIMEOUT_MS);
     }
 
     private void applyFullscreenControlState() {
@@ -1600,12 +1688,15 @@ public final class MainActivity extends Activity {
             }
             playerView.setUseController(true);
             playerView.setControllerAutoShow(true);
+            applyFullscreenSystemUiVisibility();
             updatePlayerInfoOverlay();
             updateVideoFeedbackVisibility();
             return;
         }
 
         playerView.setControllerAutoShow(false);
+        applyFullscreenSystemUiVisibility();
+        updateFullscreenOverlayLayout(true);
         if (fullscreenLocked) {
             fullscreenButton.setVisibility(View.GONE);
             fullscreenInfoText.setVisibility(View.GONE);
@@ -1614,6 +1705,7 @@ public final class MainActivity extends Activity {
             }
             if (unlockButton != null) {
                 unlockButton.setVisibility(fullscreenControlsVisible ? View.VISIBLE : View.GONE);
+                unlockButton.bringToFront();
             }
             playerView.hideController();
             playerView.setUseController(false);
@@ -1623,8 +1715,10 @@ public final class MainActivity extends Activity {
         }
 
         fullscreenButton.setVisibility(fullscreenControlsVisible ? View.VISIBLE : View.GONE);
+        fullscreenButton.bringToFront();
         if (lockButton != null) {
             lockButton.setVisibility(fullscreenControlsVisible ? View.VISIBLE : View.GONE);
+            lockButton.bringToFront();
         }
         if (unlockButton != null) {
             unlockButton.setVisibility(View.GONE);
@@ -1640,12 +1734,39 @@ public final class MainActivity extends Activity {
         updateVideoFeedbackVisibility();
     }
 
+    private void applyFullscreenSystemUiVisibility() {
+        Window window = getWindow();
+        View decorView = window.getDecorView();
+        if (!isFullscreen) {
+            window.clearFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
+            configureWindow();
+            return;
+        }
+
+        boolean showSystemBars = fullscreenControlsVisible && !fullscreenLocked;
+        if (showSystemBars) {
+            window.clearFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
+            decorView.setSystemUiVisibility(
+                    View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                            | View.SYSTEM_UI_FLAG_LAYOUT_STABLE);
+        } else {
+            window.addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
+            decorView.setSystemUiVisibility(
+                    View.SYSTEM_UI_FLAG_FULLSCREEN
+                            | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                            | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                            | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                            | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                            | View.SYSTEM_UI_FLAG_LAYOUT_STABLE);
+        }
+    }
+
     private void setFullscreen(boolean fullscreen) {
         isFullscreen = fullscreen;
         fullscreenControlsVisible = false;
         fullscreenLocked = false;
         mainHandler.removeCallbacks(hideFullscreenControlsRunnable);
-        fullscreenButton.setText(fullscreen ? "退出" : "全屏");
+        updateFullscreenButtonIcon(fullscreen);
         channelTopBar.setVisibility(fullscreen ? View.GONE : View.VISIBLE);
         channelControls.setVisibility(fullscreen ? View.GONE : View.VISIBLE);
         channelScrollView.setVisibility(fullscreen ? View.GONE : View.VISIBLE);
@@ -1670,12 +1791,7 @@ public final class MainActivity extends Activity {
         Window window = getWindow();
         if (fullscreen) {
             setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE);
-            window.clearFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
-            window.getDecorView().setSystemUiVisibility(
-                    View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
-                            | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
-                            | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
-                            | View.SYSTEM_UI_FLAG_LAYOUT_STABLE);
+            applyFullscreenSystemUiVisibility();
         } else {
             setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED);
             window.clearFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
@@ -1696,22 +1812,50 @@ public final class MainActivity extends Activity {
         if (playerContainer == null || fullscreenButton == null || fullscreenInfoText == null) {
             return;
         }
-        int top = fullscreen ? statusBarInsetTop() + dp(10) : dp(10);
+        int top;
+        if (fullscreen && fullscreenControlsVisible && !fullscreenLocked) {
+            top = Math.max(statusBarInsetTop(), dp(28)) + dp(8);
+        } else {
+            top = fullscreen ? dp(10) : dp(10);
+        }
+        int screenWidth = getResources().getDisplayMetrics().widthPixels;
 
         FrameLayout.LayoutParams buttonParams = (FrameLayout.LayoutParams) fullscreenButton.getLayoutParams();
-        buttonParams.gravity = Gravity.END | Gravity.TOP;
-        buttonParams.setMargins(0, top, dp(12), 0);
+        buttonParams.gravity = Gravity.END | Gravity.BOTTOM;
+        buttonParams.width = dp(44);
+        buttonParams.height = dp(44);
+        buttonParams.setMargins(0, 0, fullscreen ? dp(72) : dp(12), fullscreen ? dp(24) : dp(12));
         fullscreenButton.setLayoutParams(buttonParams);
+
+        if (lockButton != null) {
+            FrameLayout.LayoutParams lockParams = (FrameLayout.LayoutParams) lockButton.getLayoutParams();
+            lockParams.gravity = Gravity.START | Gravity.CENTER_VERTICAL;
+            lockParams.width = dp(44);
+            lockParams.height = dp(44);
+            lockParams.setMargins(dp(16), 0, 0, 0);
+            lockButton.setLayoutParams(lockParams);
+        }
+
+        if (unlockButton != null) {
+            FrameLayout.LayoutParams unlockParams = (FrameLayout.LayoutParams) unlockButton.getLayoutParams();
+            unlockParams.gravity = Gravity.START | Gravity.CENTER_VERTICAL;
+            unlockParams.width = dp(44);
+            unlockParams.height = dp(44);
+            unlockParams.setMargins(dp(16), 0, 0, 0);
+            unlockButton.setLayoutParams(unlockParams);
+        }
 
         FrameLayout.LayoutParams infoParams = (FrameLayout.LayoutParams) fullscreenInfoText.getLayoutParams();
         infoParams.gravity = Gravity.START | Gravity.TOP;
-        infoParams.setMargins(dp(12), top, dp(110), 0);
+        infoParams.width = fullscreen ? Math.min(dp(360), Math.max(dp(180), screenWidth - dp(320))) : ViewGroup.LayoutParams.WRAP_CONTENT;
+        infoParams.height = fullscreen ? dp(36) : dp(36);
+        infoParams.setMargins(dp(16), top, fullscreen ? dp(260) : dp(110), 0);
         fullscreenInfoText.setLayoutParams(infoParams);
 
         if (playerInfoText != null) {
             FrameLayout.LayoutParams normalInfoParams = (FrameLayout.LayoutParams) playerInfoText.getLayoutParams();
             normalInfoParams.gravity = Gravity.START | Gravity.TOP;
-            normalInfoParams.setMargins(dp(10), dp(10), dp(100), 0);
+            normalInfoParams.setMargins(dp(12), dp(10), dp(56), 0);
             playerInfoText.setLayoutParams(normalInfoParams);
         }
     }
@@ -1733,10 +1877,16 @@ public final class MainActivity extends Activity {
             if (playerView != null) {
                 playerView.setKeepScreenOn(true);
             }
+            if (floatingPlayerView != null) {
+                floatingPlayerView.setKeepScreenOn(true);
+            }
         } else {
             window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
             if (playerView != null) {
                 playerView.setKeepScreenOn(false);
+            }
+            if (floatingPlayerView != null) {
+                floatingPlayerView.setKeepScreenOn(false);
             }
         }
     }
@@ -1746,6 +1896,214 @@ public final class MainActivity extends Activity {
                 && player.getPlayWhenReady()
                 && (player.getPlaybackState() == Player.STATE_READY
                 || player.getPlaybackState() == Player.STATE_BUFFERING);
+    }
+
+    private boolean canDrawOverlayWindow() {
+        return Settings.canDrawOverlays(this);
+    }
+
+    private void setFloatingWindowEnabled(boolean enabled, boolean fromUser) {
+        if (enabled && !canDrawOverlayWindow()) {
+            floatingWindowEnabled = false;
+            AppPreferences.saveFloatingWindow(this, false);
+            updateFloatingWindowSwitch(false);
+            requestingOverlayPermission = true;
+            if (statusText != null) {
+                statusText.setText("请允许 WagonLink 显示在其他应用上层");
+            }
+            Intent intent = new Intent(
+                    Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                    Uri.parse("package:" + getPackageName()));
+            startActivity(intent);
+            return;
+        }
+        floatingWindowEnabled = enabled;
+        AppPreferences.saveFloatingWindow(this, enabled);
+        updateFloatingWindowSwitch(enabled);
+        if (!enabled) {
+            hideFloatingWindow(false);
+        } else if (fromUser && statusText != null) {
+            statusText.setText("已开启悬浮窗，播放时返回桌面会自动进入小窗");
+        }
+    }
+
+    private void updateFloatingWindowSwitch(boolean checked) {
+        if (floatingWindowSwitch == null || floatingWindowSwitch.isChecked() == checked) {
+            return;
+        }
+        floatingWindowSwitch.setOnCheckedChangeListener(null);
+        floatingWindowSwitch.setChecked(checked);
+        floatingWindowSwitch.setOnCheckedChangeListener((buttonView, nextChecked) -> setFloatingWindowEnabled(nextChecked, true));
+    }
+
+    private boolean shouldEnterFloatingWindow() {
+        return floatingWindowEnabled
+                && !requestingOverlayPermission
+                && canDrawOverlayWindow()
+                && floatingWindowView == null
+                && isPlaybackActive();
+    }
+
+    private boolean enterFloatingWindowIfNeeded() {
+        if (!shouldEnterFloatingWindow()) {
+            return false;
+        }
+        showFloatingWindow();
+        return floatingWindowView != null;
+    }
+
+    private void scheduleFloatingWindowEntry() {
+        mainHandler.removeCallbacks(enterFloatingWindowRunnable);
+        if (shouldEnterFloatingWindow()) {
+            mainHandler.postDelayed(enterFloatingWindowRunnable, 220);
+        }
+    }
+
+    private void showFloatingWindow() {
+        if (floatingWindowView != null || player == null || !canDrawOverlayWindow()) {
+            return;
+        }
+        if (isFullscreen) {
+            setFullscreen(false);
+        }
+        overlayWindowManager = (WindowManager) getSystemService(Context.WINDOW_SERVICE);
+        if (overlayWindowManager == null) {
+            return;
+        }
+
+        int defaultWidth = Math.min(getResources().getDisplayMetrics().widthPixels - dp(36), dp(360));
+        int defaultHeight = Math.round(defaultWidth * 9f / 16f) + dp(40);
+        int width = clamp(
+                AppPreferences.loadFloatingWidth(this, defaultWidth),
+                dp(220),
+                getResources().getDisplayMetrics().widthPixels - dp(24));
+        int height = clamp(
+                AppPreferences.loadFloatingHeight(this, defaultHeight),
+                dp(160),
+                getResources().getDisplayMetrics().heightPixels - dp(80));
+        int x = clamp(AppPreferences.loadFloatingX(this, dp(12)), 0, Math.max(0, getResources().getDisplayMetrics().widthPixels - width));
+        int y = clamp(AppPreferences.loadFloatingY(this, dp(88)), 0, Math.max(0, getResources().getDisplayMetrics().heightPixels - height));
+
+        floatingWindowParams = new WindowManager.LayoutParams(
+                width,
+                height,
+                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                        | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
+                        | WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON,
+                PixelFormat.TRANSLUCENT);
+        floatingWindowParams.gravity = Gravity.START | Gravity.TOP;
+        floatingWindowParams.x = x;
+        floatingWindowParams.y = y;
+
+        floatingWindowView = buildFloatingWindowView();
+        attachPlayerToFloatingWindow();
+        overlayWindowManager.addView(floatingWindowView, floatingWindowParams);
+        if (statusText != null) {
+            statusText.setText("已进入悬浮窗播放");
+        }
+    }
+
+    private View buildFloatingWindowView() {
+        FrameLayout panel = new FrameLayout(this);
+        panel.setBackground(roundRect(Color.BLACK, 18));
+
+        floatingPlayerView = new PlayerView(this);
+        floatingPlayerView.setUseController(false);
+        floatingPlayerView.setControllerAutoShow(false);
+        floatingPlayerView.setBackgroundColor(Color.BLACK);
+        panel.addView(floatingPlayerView, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT));
+
+        View touchLayer = new View(this);
+        touchLayer.setBackgroundColor(Color.TRANSPARENT);
+        touchLayer.setOnTouchListener(new FloatingWindowTouchListener());
+        panel.addView(touchLayer, fillFrame());
+
+        Button closeButton = iconButton(new CloseIconDrawable(dp(22), Color.WHITE));
+        closeButton.setContentDescription("关闭悬浮窗");
+        closeButton.setOnClickListener(view -> hideFloatingWindow(false));
+        FrameLayout.LayoutParams closeParams = new FrameLayout.LayoutParams(
+                dp(44),
+                dp(44),
+                Gravity.END | Gravity.TOP);
+        closeParams.setMargins(0, 0, 0, 0);
+        panel.addView(closeButton, closeParams);
+        closeButton.bringToFront();
+        return panel;
+    }
+
+    private void attachPlayerToFloatingWindow() {
+        if (floatingPlayerView == null || player == null) {
+            return;
+        }
+        if (playerView != null) {
+            playerView.setPlayer(null);
+        }
+        floatingPlayerView.setPlayer(player);
+        floatingPlayerAttached = true;
+        updateKeepScreenOn();
+    }
+
+    private void restorePlayerToPage() {
+        if (floatingPlayerView != null) {
+            floatingPlayerView.setPlayer(null);
+        }
+        if (playerView != null && player != null) {
+            playerView.setPlayer(player);
+        }
+        floatingPlayerAttached = false;
+        updateKeepScreenOn();
+    }
+
+    private void hideFloatingWindow(boolean releaseOnly) {
+        if (floatingWindowView == null) {
+            return;
+        }
+        saveFloatingWindowBounds();
+        if (!releaseOnly) {
+            restorePlayerToPage();
+        } else if (floatingPlayerView != null) {
+            floatingPlayerView.setPlayer(null);
+        }
+        if (overlayWindowManager != null) {
+            try {
+                overlayWindowManager.removeView(floatingWindowView);
+            } catch (IllegalArgumentException ignored) {
+            }
+        }
+        floatingWindowView = null;
+        floatingPlayerView = null;
+        floatingWindowParams = null;
+    }
+
+    private void returnFromFloatingWindowToFullscreen() {
+        hideFloatingWindow(false);
+        Intent intent = new Intent(this, MainActivity.class);
+        intent.addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        startActivity(intent);
+        mainHandler.postDelayed(() -> {
+            if (!destroyed && player != null && !isFullscreen) {
+                setFullscreen(true);
+            }
+        }, 220);
+    }
+
+    private void saveFloatingWindowBounds() {
+        if (floatingWindowParams == null) {
+            return;
+        }
+        AppPreferences.saveFloatingBounds(
+                this,
+                floatingWindowParams.x,
+                floatingWindowParams.y,
+                floatingWindowParams.width,
+                floatingWindowParams.height);
+    }
+
+    private int clamp(int value, int min, int max) {
+        return Math.max(min, Math.min(value, max));
     }
 
     private EditText field(String hint) {
@@ -1797,6 +2155,37 @@ public final class MainActivity extends Activity {
         button.setMinWidth(0);
         button.setPadding(dp(8), 0, dp(8), 0);
         return button;
+    }
+
+    private Button iconButton(Drawable icon) {
+        Button button = new Button(this);
+        button.setText("");
+        button.setAllCaps(false);
+        button.setMinHeight(0);
+        button.setMinWidth(0);
+        button.setPadding(0, 0, 0, 0);
+        button.setBackground(null);
+        button.setCompoundDrawablesWithIntrinsicBounds(null, icon, null, null);
+        return button;
+    }
+
+    private Button lockIconButton(boolean locked) {
+        Button button = iconButton(new LockIconDrawable(locked, dp(26), Color.WHITE));
+        button.setContentDescription(locked ? "解除锁定" : "锁定");
+        button.setPadding(0, 0, 0, 0);
+        return button;
+    }
+
+    private void updateFullscreenButtonIcon(boolean fullscreen) {
+        if (fullscreenButton == null) {
+            return;
+        }
+        fullscreenButton.setCompoundDrawablesWithIntrinsicBounds(
+                null,
+                new FullscreenIconDrawable(fullscreen, dp(24), Color.WHITE),
+                null,
+                null);
+        fullscreenButton.setContentDescription(fullscreen ? "退出全屏" : "全屏");
     }
 
     private TextView smallText(String text) {
@@ -1891,9 +2280,38 @@ public final class MainActivity extends Activity {
     }
 
     @Override
+    protected void onResume() {
+        super.onResume();
+        mainHandler.removeCallbacks(enterFloatingWindowRunnable);
+        if (requestingOverlayPermission) {
+            requestingOverlayPermission = false;
+            boolean granted = canDrawOverlayWindow();
+            floatingWindowEnabled = granted;
+            AppPreferences.saveFloatingWindow(this, granted);
+            updateFloatingWindowSwitch(granted);
+            if (statusText != null) {
+                statusText.setText(granted
+                        ? "已开启悬浮窗，播放时返回桌面会自动进入小窗"
+                        : "未获得悬浮窗权限");
+            }
+            return;
+        }
+        if (floatingWindowView != null) {
+            hideFloatingWindow(false);
+        }
+    }
+
+    @Override
+    protected void onUserLeaveHint() {
+        super.onUserLeaveHint();
+        scheduleFloatingWindowEntry();
+    }
+
+    @Override
     protected void onDestroy() {
         destroyed = true;
         getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        hideFloatingWindow(true);
         if (player != null) {
             player.release();
             player = null;
@@ -1912,6 +2330,11 @@ public final class MainActivity extends Activity {
             showTab(true);
             return;
         }
+        if (shouldEnterFloatingWindow()) {
+            moveTaskToBack(true);
+            scheduleFloatingWindowEntry();
+            return;
+        }
         super.onBackPressed();
     }
 
@@ -1927,6 +2350,286 @@ public final class MainActivity extends Activity {
 
     private interface PopupSelection {
         void onSelect(int position);
+    }
+
+    private final class FloatingWindowTouchListener implements View.OnTouchListener {
+        private int startX;
+        private int startY;
+        private int startWidth;
+        private int startHeight;
+        private float downRawX;
+        private float downRawY;
+        private boolean resizing;
+        private boolean moved;
+
+        @Override
+        public boolean onTouch(View view, MotionEvent event) {
+            if (floatingWindowParams == null || overlayWindowManager == null || floatingWindowView == null) {
+                return false;
+            }
+            switch (event.getActionMasked()) {
+                case MotionEvent.ACTION_DOWN:
+                    startX = floatingWindowParams.x;
+                    startY = floatingWindowParams.y;
+                    startWidth = floatingWindowParams.width;
+                    startHeight = floatingWindowParams.height;
+                    downRawX = event.getRawX();
+                    downRawY = event.getRawY();
+                    resizing = event.getX() >= Math.max(0, view.getWidth() - dp(56))
+                            && event.getY() >= Math.max(0, view.getHeight() - dp(56));
+                    moved = false;
+                    return true;
+                case MotionEvent.ACTION_MOVE:
+                    int deltaX = Math.round(event.getRawX() - downRawX);
+                    int deltaY = Math.round(event.getRawY() - downRawY);
+                    moved = moved || Math.abs(deltaX) > dp(6) || Math.abs(deltaY) > dp(6);
+                    if (resizing) {
+                        resizeFloatingWindow(deltaX, deltaY);
+                    } else {
+                        moveFloatingWindow(deltaX, deltaY);
+                    }
+                    return true;
+                case MotionEvent.ACTION_UP:
+                case MotionEvent.ACTION_CANCEL:
+                    saveFloatingWindowBounds();
+                    if (!moved && event.getActionMasked() == MotionEvent.ACTION_UP) {
+                        returnFromFloatingWindowToFullscreen();
+                    }
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        private void moveFloatingWindow(int deltaX, int deltaY) {
+            int screenWidth = getResources().getDisplayMetrics().widthPixels;
+            int screenHeight = getResources().getDisplayMetrics().heightPixels;
+            floatingWindowParams.x = clamp(startX + deltaX, 0, Math.max(0, screenWidth - floatingWindowParams.width));
+            floatingWindowParams.y = clamp(startY + deltaY, 0, Math.max(0, screenHeight - floatingWindowParams.height));
+            overlayWindowManager.updateViewLayout(floatingWindowView, floatingWindowParams);
+        }
+
+        private void resizeFloatingWindow(int deltaX, int deltaY) {
+            int screenWidth = getResources().getDisplayMetrics().widthPixels;
+            int screenHeight = getResources().getDisplayMetrics().heightPixels;
+            int maxWidth = Math.max(dp(220), screenWidth - floatingWindowParams.x);
+            int maxHeight = Math.max(dp(160), screenHeight - floatingWindowParams.y);
+            floatingWindowParams.width = clamp(startWidth + deltaX, dp(220), maxWidth);
+            floatingWindowParams.height = clamp(startHeight + deltaY, dp(160), maxHeight);
+            overlayWindowManager.updateViewLayout(floatingWindowView, floatingWindowParams);
+        }
+    }
+
+    private static final class CloseIconDrawable extends Drawable {
+        private final int size;
+        private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+
+        CloseIconDrawable(int size, int color) {
+            this.size = size;
+            paint.setColor(color);
+            paint.setStyle(Paint.Style.STROKE);
+            paint.setStrokeCap(Paint.Cap.ROUND);
+            paint.setStrokeJoin(Paint.Join.ROUND);
+            paint.setStrokeWidth(Math.max(2f, size * 0.11f));
+        }
+
+        @Override
+        public void draw(Canvas canvas) {
+            RectF bounds = new RectF(getBounds());
+            float unit = Math.min(bounds.width(), bounds.height());
+            float left = bounds.left + (bounds.width() - unit) / 2f;
+            float top = bounds.top + (bounds.height() - unit) / 2f;
+            canvas.drawLine(
+                    left + unit * 0.28f,
+                    top + unit * 0.28f,
+                    left + unit * 0.72f,
+                    top + unit * 0.72f,
+                    paint);
+            canvas.drawLine(
+                    left + unit * 0.72f,
+                    top + unit * 0.28f,
+                    left + unit * 0.28f,
+                    top + unit * 0.72f,
+                    paint);
+        }
+
+        @Override
+        public void setAlpha(int alpha) {
+            paint.setAlpha(alpha);
+        }
+
+        @Override
+        public void setColorFilter(android.graphics.ColorFilter colorFilter) {
+            paint.setColorFilter(colorFilter);
+        }
+
+        @Override
+        public int getOpacity() {
+            return PixelFormat.TRANSLUCENT;
+        }
+
+        @Override
+        public int getIntrinsicWidth() {
+            return size;
+        }
+
+        @Override
+        public int getIntrinsicHeight() {
+            return size;
+        }
+    }
+
+    private static final class FullscreenIconDrawable extends Drawable {
+        private final boolean exit;
+        private final int size;
+        private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+
+        FullscreenIconDrawable(boolean exit, int size, int color) {
+            this.exit = exit;
+            this.size = size;
+            paint.setColor(color);
+            paint.setStyle(Paint.Style.STROKE);
+            paint.setStrokeCap(Paint.Cap.SQUARE);
+            paint.setStrokeJoin(Paint.Join.MITER);
+            paint.setStrokeWidth(Math.max(2f, size * 0.09f));
+        }
+
+        @Override
+        public void draw(Canvas canvas) {
+            RectF bounds = new RectF(getBounds());
+            float unit = Math.min(bounds.width(), bounds.height());
+            float left = bounds.left + (bounds.width() - unit) / 2f;
+            float top = bounds.top + (bounds.height() - unit) / 2f;
+
+            if (exit) {
+                drawArrow(canvas, left + unit * 0.18f, top + unit * 0.18f,
+                        left + unit * 0.43f, top + unit * 0.43f,
+                        left + unit * 0.43f, top + unit * 0.28f,
+                        left + unit * 0.28f, top + unit * 0.43f);
+                drawArrow(canvas, left + unit * 0.82f, top + unit * 0.82f,
+                        left + unit * 0.57f, top + unit * 0.57f,
+                        left + unit * 0.57f, top + unit * 0.72f,
+                        left + unit * 0.72f, top + unit * 0.57f);
+            } else {
+                drawArrow(canvas, left + unit * 0.43f, top + unit * 0.43f,
+                        left + unit * 0.18f, top + unit * 0.18f,
+                        left + unit * 0.18f, top + unit * 0.34f,
+                        left + unit * 0.34f, top + unit * 0.18f);
+                drawArrow(canvas, left + unit * 0.57f, top + unit * 0.57f,
+                        left + unit * 0.82f, top + unit * 0.82f,
+                        left + unit * 0.82f, top + unit * 0.66f,
+                        left + unit * 0.66f, top + unit * 0.82f);
+            }
+        }
+
+        private void drawArrow(Canvas canvas, float startX, float startY, float endX, float endY,
+                               float headX1, float headY1, float headX2, float headY2) {
+            canvas.drawLine(startX, startY, endX, endY, paint);
+            canvas.drawLine(endX, endY, headX1, headY1, paint);
+            canvas.drawLine(endX, endY, headX2, headY2, paint);
+        }
+
+        @Override
+        public void setAlpha(int alpha) {
+            paint.setAlpha(alpha);
+        }
+
+        @Override
+        public void setColorFilter(android.graphics.ColorFilter colorFilter) {
+            paint.setColorFilter(colorFilter);
+        }
+
+        @Override
+        public int getOpacity() {
+            return PixelFormat.TRANSLUCENT;
+        }
+
+        @Override
+        public int getIntrinsicWidth() {
+            return size;
+        }
+
+        @Override
+        public int getIntrinsicHeight() {
+            return size;
+        }
+    }
+
+    private static final class LockIconDrawable extends Drawable {
+        private final boolean locked;
+        private final int size;
+        private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Path shacklePath = new Path();
+        private final RectF body = new RectF();
+
+        LockIconDrawable(boolean locked, int size, int color) {
+            this.locked = locked;
+            this.size = size;
+            paint.setColor(color);
+            paint.setStyle(Paint.Style.STROKE);
+            paint.setStrokeCap(Paint.Cap.ROUND);
+            paint.setStrokeJoin(Paint.Join.ROUND);
+        }
+
+        @Override
+        public void draw(Canvas canvas) {
+            RectF bounds = new RectF(getBounds());
+            float width = bounds.width();
+            float height = bounds.height();
+            float unit = Math.min(width, height);
+            float centerX = bounds.centerX();
+            float centerY = bounds.centerY();
+            paint.setStrokeWidth(Math.max(2f, unit * 0.075f));
+
+            body.set(
+                    centerX - unit * 0.25f,
+                    centerY - unit * 0.02f,
+                    centerX + unit * 0.25f,
+                    centerY + unit * 0.30f);
+            canvas.drawRoundRect(body, unit * 0.055f, unit * 0.055f, paint);
+
+            shacklePath.reset();
+            if (locked) {
+                shacklePath.moveTo(centerX - unit * 0.18f, centerY - unit * 0.02f);
+                shacklePath.lineTo(centerX - unit * 0.18f, centerY - unit * 0.20f);
+                shacklePath.quadTo(centerX - unit * 0.18f, centerY - unit * 0.40f, centerX, centerY - unit * 0.40f);
+                shacklePath.quadTo(centerX + unit * 0.18f, centerY - unit * 0.40f, centerX + unit * 0.18f, centerY - unit * 0.20f);
+                shacklePath.lineTo(centerX + unit * 0.18f, centerY - unit * 0.02f);
+            } else {
+                shacklePath.moveTo(centerX - unit * 0.18f, centerY - unit * 0.02f);
+                shacklePath.lineTo(centerX - unit * 0.18f, centerY - unit * 0.20f);
+                shacklePath.quadTo(centerX - unit * 0.15f, centerY - unit * 0.39f, centerX + unit * 0.07f, centerY - unit * 0.37f);
+                shacklePath.lineTo(centerX + unit * 0.22f, centerY - unit * 0.27f);
+            }
+            canvas.drawPath(shacklePath, paint);
+
+            canvas.drawLine(centerX, centerY + unit * 0.10f, centerX, centerY + unit * 0.20f, paint);
+        }
+
+        @Override
+        public void setAlpha(int alpha) {
+            paint.setAlpha(alpha);
+        }
+
+        @Override
+        public void setColorFilter(android.graphics.ColorFilter colorFilter) {
+            paint.setColorFilter(colorFilter);
+        }
+
+        @Override
+        public int getOpacity() {
+            return PixelFormat.TRANSLUCENT;
+        }
+
+        @Override
+        public int getIntrinsicWidth() {
+            return size;
+        }
+
+        @Override
+        public int getIntrinsicHeight() {
+            return size;
+        }
     }
 
     private final class ThemedListAdapter extends ArrayAdapter<String> {
