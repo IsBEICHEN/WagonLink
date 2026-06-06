@@ -5,12 +5,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.res.Configuration;
 import android.content.pm.ActivityInfo;
-import android.graphics.Canvas;
 import android.graphics.Color;
-import android.graphics.Paint;
-import android.graphics.Path;
-import android.graphics.PixelFormat;
-import android.graphics.RectF;
 import android.graphics.Typeface;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
@@ -22,9 +17,7 @@ import android.provider.Settings;
 import android.text.Editable;
 import android.text.InputType;
 import android.text.TextUtils;
-import android.text.TextWatcher;
 import android.view.Gravity;
-import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.Window;
@@ -33,8 +26,6 @@ import android.view.WindowManager;
 import android.view.inputmethod.InputMethodManager;
 import android.view.animation.DecelerateInterpolator;
 import android.widget.AdapterView;
-import android.widget.ArrayAdapter;
-import android.widget.AbsListView;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.FrameLayout;
@@ -115,7 +106,7 @@ public final class MainActivity extends Activity {
     private FrameLayout bottomTabsHost;
     private ProgressBar progressBar;
     private ListView subscriptionListView;
-    private ArrayAdapter<String> subscriptionListAdapter;
+    private SubscriptionListAdapter subscriptionListAdapter;
     private EditText subscriptionNameInput;
     private EditText subscriptionUrlInput;
     private Button saveSubscriptionButton;
@@ -125,10 +116,7 @@ public final class MainActivity extends Activity {
     private Switch floatingWindowSwitch;
     private TextView subscriptionStatusText;
     private PopupWindow subscriptionEditorPopup;
-    private WindowManager overlayWindowManager;
-    private View floatingWindowView;
-    private PlayerView floatingPlayerView;
-    private WindowManager.LayoutParams floatingWindowParams;
+    private FloatingWindowController floatingWindowController;
     private boolean destroyed;
     private boolean isFullscreen;
     private boolean fullscreenControlsVisible;
@@ -138,7 +126,6 @@ public final class MainActivity extends Activity {
     private boolean tabLayoutReady;
     private boolean floatingWindowEnabled;
     private boolean requestingOverlayPermission;
-    private boolean floatingPlayerAttached;
     private int currentTabIndex;
     private int playRequestToken;
     private String activeSubscriptionUrl = "";
@@ -172,6 +159,22 @@ public final class MainActivity extends Activity {
         player = new ExoPlayer.Builder(this).build();
         attachPlayerListener();
         setContentView(buildContentView());
+        floatingWindowController = new FloatingWindowController(
+                this,
+                mainHandler,
+                player,
+                playerView,
+                () -> {
+                    if (isFullscreen) {
+                        setFullscreen(false);
+                    }
+                },
+                () -> {
+                    if (!destroyed && player != null && !isFullscreen) {
+                        setFullscreen(true);
+                    }
+                },
+                this::updateKeepScreenOn);
         String lastSubscriptionId = AppPreferences.loadLastSubscriptionId(this);
         reloadSubscriptions(lastSubscriptionId);
         if (!lastSubscriptionId.isEmpty() && !activeSubscriptionId.isEmpty()) {
@@ -319,7 +322,7 @@ public final class MainActivity extends Activity {
         LinearLayout page = new LinearLayout(this);
         page.setOrientation(LinearLayout.VERTICAL);
         page.setBackgroundColor(colorAppBg);
-        page.setPadding(0, dp(26), 0, 0);
+        page.setPadding(0, dp(28), 0, 0);
 
         channelTopBar = buildChannelTopBar();
         page.addView(channelTopBar);
@@ -346,7 +349,7 @@ public final class MainActivity extends Activity {
         TextView title = new TextView(this);
         title.setText("WagonLink");
         title.setTextColor(colorText);
-        title.setTextSize(23);
+        title.setTextSize(24);
         title.setTypeface(Typeface.DEFAULT_BOLD);
         title.setGravity(Gravity.CENTER_VERTICAL);
         title.setSingleLine(true);
@@ -448,14 +451,14 @@ public final class MainActivity extends Activity {
         infoParams.setMargins(dp(10), dp(10), dp(100), 0);
         playerContainer.addView(fullscreenInfoText, infoParams);
 
-        fullscreenButton = iconButton(new FullscreenIconDrawable(false, dp(24), Color.WHITE));
+        fullscreenButton = iconButton(UiIcons.fullscreen(false, dp(18), Color.WHITE));
         fullscreenButton.setContentDescription("全屏");
         fullscreenButton.setOnClickListener(view -> setFullscreen(!isFullscreen));
         FrameLayout.LayoutParams fullscreenParams = new FrameLayout.LayoutParams(
-                dp(44),
-                dp(44),
+                dp(36),
+                dp(36),
                 Gravity.END | Gravity.BOTTOM);
-        fullscreenParams.setMargins(0, 0, dp(12), dp(12));
+        fullscreenParams.setMargins(0, 0, dp(8), dp(8));
         playerContainer.addView(fullscreenButton, fullscreenParams);
 
         lockButton = lockIconButton(false);
@@ -584,16 +587,11 @@ public final class MainActivity extends Activity {
         LinearLayout page = new LinearLayout(this);
         page.setOrientation(LinearLayout.VERTICAL);
         page.setBackgroundColor(colorAppBg);
-        page.setPadding(dp(18), dp(30), dp(18), dp(10));
+        page.setPadding(dp(18), dp(28), dp(18), dp(10));
 
         LinearLayout header = new LinearLayout(this);
         header.setOrientation(LinearLayout.HORIZONTAL);
         header.setGravity(Gravity.CENTER_VERTICAL);
-
-        Button addButton = pillButton("+", COLOR_PRIMARY, Color.WHITE);
-        addButton.setTextSize(22);
-        addButton.setOnClickListener(view -> clearSubscriptionEditor());
-        header.addView(addButton, new LinearLayout.LayoutParams(dp(46), dp(42)));
 
         TextView title = new TextView(this);
         title.setText("订阅");
@@ -601,18 +599,28 @@ public final class MainActivity extends Activity {
         title.setTextSize(24);
         title.setTypeface(Typeface.DEFAULT_BOLD);
         title.setGravity(Gravity.CENTER_VERTICAL);
-        title.setPadding(dp(12), 0, 0, 0);
-        header.addView(title, weighted(0, 42));
+        header.addView(title, weighted(0, 40));
+
+        Button addButton = iconButton(UiIcons.plus(dp(20), COLOR_PRIMARY));
+        addButton.setContentDescription("新增订阅");
+        addButton.setOnClickListener(view -> clearSubscriptionEditor());
+        header.addView(addButton, new LinearLayout.LayoutParams(dp(40), dp(40)));
         page.addView(header);
 
-        subscriptionStatusText = smallText("点按加载订阅，长按可编辑或删除。左上角 + 可新增。");
+        subscriptionStatusText = smallText("点按加载订阅，长按可编辑或删除。右上角 + 可新增。");
         LinearLayout.LayoutParams subtitleParams = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT);
         subtitleParams.setMargins(0, dp(6), 0, dp(10));
         page.addView(subscriptionStatusText, subtitleParams);
 
-        subscriptionListAdapter = new SubscriptionListAdapter(this);
+        subscriptionListAdapter = new SubscriptionListAdapter(
+                this,
+                subscriptions,
+                () -> activeSubscriptionId,
+                COLOR_PRIMARY,
+                () -> colorText,
+                () -> colorCard);
         subscriptionListView = new ListView(this);
         subscriptionListView.setAdapter(subscriptionListAdapter);
         subscriptionListView.setDivider(null);
@@ -638,7 +646,7 @@ public final class MainActivity extends Activity {
         LinearLayout page = new LinearLayout(this);
         page.setOrientation(LinearLayout.VERTICAL);
         page.setBackgroundColor(colorAppBg);
-        page.setPadding(dp(18), dp(30), dp(18), dp(10));
+        page.setPadding(dp(18), dp(28), dp(18), dp(10));
 
         TextView title = new TextView(this);
         title.setText("设置");
@@ -657,8 +665,8 @@ public final class MainActivity extends Activity {
         LinearLayout appearance = new LinearLayout(this);
         appearance.setOrientation(LinearLayout.VERTICAL);
         appearance.setPadding(dp(14), dp(12), dp(14), dp(12));
-        appearance.setBackground(roundRectWithStroke(colorCard, 22));
-        appearance.setElevation(glassEffectEnabled ? dp(8) : 0);
+        appearance.setBackground(roundRectWithStroke(colorCard, 18));
+        appearance.setElevation(glassEffectEnabled ? dp(4) : 0);
 
         TextView appearanceTitle = new TextView(this);
         appearanceTitle.setText("外观");
@@ -684,8 +692,8 @@ public final class MainActivity extends Activity {
         LinearLayout playback = new LinearLayout(this);
         playback.setOrientation(LinearLayout.VERTICAL);
         playback.setPadding(dp(14), dp(12), dp(14), dp(12));
-        playback.setBackground(roundRectWithStroke(colorCard, 22));
-        playback.setElevation(glassEffectEnabled ? dp(8) : 0);
+        playback.setBackground(roundRectWithStroke(colorCard, 18));
+        playback.setElevation(glassEffectEnabled ? dp(4) : 0);
 
         TextView playbackTitle = new TextView(this);
         playbackTitle.setText("播放");
@@ -1211,7 +1219,7 @@ public final class MainActivity extends Activity {
 
     private void showPopupList(View anchor, List<String> items, PopupSelection selection) {
         ListView listView = new ListView(this);
-        ThemedListAdapter adapter = new ThemedListAdapter(this);
+        ThemedListAdapter adapter = new ThemedListAdapter(this, colorText, colorCard);
         adapter.addAll(items);
         listView.setAdapter(adapter);
         listView.setDivider(null);
@@ -1253,7 +1261,7 @@ public final class MainActivity extends Activity {
                 dp(38)));
 
         ListView listView = new ListView(this);
-        ThemedListAdapter adapter = new ThemedListAdapter(this);
+        ThemedListAdapter adapter = new ThemedListAdapter(this, colorText, colorCard);
         adapter.addAll(items);
         listView.setAdapter(adapter);
         listView.setDivider(null);
@@ -1822,9 +1830,9 @@ public final class MainActivity extends Activity {
 
         FrameLayout.LayoutParams buttonParams = (FrameLayout.LayoutParams) fullscreenButton.getLayoutParams();
         buttonParams.gravity = Gravity.END | Gravity.BOTTOM;
-        buttonParams.width = dp(44);
-        buttonParams.height = dp(44);
-        buttonParams.setMargins(0, 0, fullscreen ? dp(72) : dp(12), fullscreen ? dp(24) : dp(12));
+        buttonParams.width = fullscreen ? dp(40) : dp(36);
+        buttonParams.height = fullscreen ? dp(40) : dp(36);
+        buttonParams.setMargins(0, 0, fullscreen ? dp(72) : dp(8), fullscreen ? 0 : dp(8));
         fullscreenButton.setLayoutParams(buttonParams);
 
         if (lockButton != null) {
@@ -1877,16 +1885,16 @@ public final class MainActivity extends Activity {
             if (playerView != null) {
                 playerView.setKeepScreenOn(true);
             }
-            if (floatingPlayerView != null) {
-                floatingPlayerView.setKeepScreenOn(true);
+            if (floatingWindowController != null) {
+                floatingWindowController.setKeepScreenOn(true);
             }
         } else {
             window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
             if (playerView != null) {
                 playerView.setKeepScreenOn(false);
             }
-            if (floatingPlayerView != null) {
-                floatingPlayerView.setKeepScreenOn(false);
+            if (floatingWindowController != null) {
+                floatingWindowController.setKeepScreenOn(false);
             }
         }
     }
@@ -1921,7 +1929,9 @@ public final class MainActivity extends Activity {
         AppPreferences.saveFloatingWindow(this, enabled);
         updateFloatingWindowSwitch(enabled);
         if (!enabled) {
-            hideFloatingWindow(false);
+            if (floatingWindowController != null) {
+                floatingWindowController.hide(false);
+            }
         } else if (fromUser && statusText != null) {
             statusText.setText("已开启悬浮窗，播放时返回桌面会自动进入小窗");
         }
@@ -1940,7 +1950,8 @@ public final class MainActivity extends Activity {
         return floatingWindowEnabled
                 && !requestingOverlayPermission
                 && canDrawOverlayWindow()
-                && floatingWindowView == null
+                && floatingWindowController != null
+                && !floatingWindowController.isShowing()
                 && isPlaybackActive();
     }
 
@@ -1948,8 +1959,8 @@ public final class MainActivity extends Activity {
         if (!shouldEnterFloatingWindow()) {
             return false;
         }
-        showFloatingWindow();
-        return floatingWindowView != null;
+        floatingWindowController.show();
+        return floatingWindowController.isShowing();
     }
 
     private void scheduleFloatingWindowEntry() {
@@ -1957,153 +1968,6 @@ public final class MainActivity extends Activity {
         if (shouldEnterFloatingWindow()) {
             mainHandler.postDelayed(enterFloatingWindowRunnable, 220);
         }
-    }
-
-    private void showFloatingWindow() {
-        if (floatingWindowView != null || player == null || !canDrawOverlayWindow()) {
-            return;
-        }
-        if (isFullscreen) {
-            setFullscreen(false);
-        }
-        overlayWindowManager = (WindowManager) getSystemService(Context.WINDOW_SERVICE);
-        if (overlayWindowManager == null) {
-            return;
-        }
-
-        int defaultWidth = Math.min(getResources().getDisplayMetrics().widthPixels - dp(36), dp(360));
-        int defaultHeight = Math.round(defaultWidth * 9f / 16f) + dp(40);
-        int width = clamp(
-                AppPreferences.loadFloatingWidth(this, defaultWidth),
-                dp(220),
-                getResources().getDisplayMetrics().widthPixels - dp(24));
-        int height = clamp(
-                AppPreferences.loadFloatingHeight(this, defaultHeight),
-                dp(160),
-                getResources().getDisplayMetrics().heightPixels - dp(80));
-        int x = clamp(AppPreferences.loadFloatingX(this, dp(12)), 0, Math.max(0, getResources().getDisplayMetrics().widthPixels - width));
-        int y = clamp(AppPreferences.loadFloatingY(this, dp(88)), 0, Math.max(0, getResources().getDisplayMetrics().heightPixels - height));
-
-        floatingWindowParams = new WindowManager.LayoutParams(
-                width,
-                height,
-                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
-                        | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
-                        | WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON,
-                PixelFormat.TRANSLUCENT);
-        floatingWindowParams.gravity = Gravity.START | Gravity.TOP;
-        floatingWindowParams.x = x;
-        floatingWindowParams.y = y;
-
-        floatingWindowView = buildFloatingWindowView();
-        attachPlayerToFloatingWindow();
-        overlayWindowManager.addView(floatingWindowView, floatingWindowParams);
-        if (statusText != null) {
-            statusText.setText("已进入悬浮窗播放");
-        }
-    }
-
-    private View buildFloatingWindowView() {
-        FrameLayout panel = new FrameLayout(this);
-        panel.setBackground(roundRect(Color.BLACK, 18));
-
-        floatingPlayerView = new PlayerView(this);
-        floatingPlayerView.setUseController(false);
-        floatingPlayerView.setControllerAutoShow(false);
-        floatingPlayerView.setBackgroundColor(Color.BLACK);
-        panel.addView(floatingPlayerView, new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.MATCH_PARENT));
-
-        View touchLayer = new View(this);
-        touchLayer.setBackgroundColor(Color.TRANSPARENT);
-        touchLayer.setOnTouchListener(new FloatingWindowTouchListener());
-        panel.addView(touchLayer, fillFrame());
-
-        Button closeButton = iconButton(new CloseIconDrawable(dp(22), Color.WHITE));
-        closeButton.setContentDescription("关闭悬浮窗");
-        closeButton.setOnClickListener(view -> hideFloatingWindow(false));
-        FrameLayout.LayoutParams closeParams = new FrameLayout.LayoutParams(
-                dp(44),
-                dp(44),
-                Gravity.END | Gravity.TOP);
-        closeParams.setMargins(0, 0, 0, 0);
-        panel.addView(closeButton, closeParams);
-        closeButton.bringToFront();
-        return panel;
-    }
-
-    private void attachPlayerToFloatingWindow() {
-        if (floatingPlayerView == null || player == null) {
-            return;
-        }
-        if (playerView != null) {
-            playerView.setPlayer(null);
-        }
-        floatingPlayerView.setPlayer(player);
-        floatingPlayerAttached = true;
-        updateKeepScreenOn();
-    }
-
-    private void restorePlayerToPage() {
-        if (floatingPlayerView != null) {
-            floatingPlayerView.setPlayer(null);
-        }
-        if (playerView != null && player != null) {
-            playerView.setPlayer(player);
-        }
-        floatingPlayerAttached = false;
-        updateKeepScreenOn();
-    }
-
-    private void hideFloatingWindow(boolean releaseOnly) {
-        if (floatingWindowView == null) {
-            return;
-        }
-        saveFloatingWindowBounds();
-        if (!releaseOnly) {
-            restorePlayerToPage();
-        } else if (floatingPlayerView != null) {
-            floatingPlayerView.setPlayer(null);
-        }
-        if (overlayWindowManager != null) {
-            try {
-                overlayWindowManager.removeView(floatingWindowView);
-            } catch (IllegalArgumentException ignored) {
-            }
-        }
-        floatingWindowView = null;
-        floatingPlayerView = null;
-        floatingWindowParams = null;
-    }
-
-    private void returnFromFloatingWindowToFullscreen() {
-        hideFloatingWindow(false);
-        Intent intent = new Intent(this, MainActivity.class);
-        intent.addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT | Intent.FLAG_ACTIVITY_SINGLE_TOP);
-        startActivity(intent);
-        mainHandler.postDelayed(() -> {
-            if (!destroyed && player != null && !isFullscreen) {
-                setFullscreen(true);
-            }
-        }, 220);
-    }
-
-    private void saveFloatingWindowBounds() {
-        if (floatingWindowParams == null) {
-            return;
-        }
-        AppPreferences.saveFloatingBounds(
-                this,
-                floatingWindowParams.x,
-                floatingWindowParams.y,
-                floatingWindowParams.width,
-                floatingWindowParams.height);
-    }
-
-    private int clamp(int value, int min, int max) {
-        return Math.max(min, Math.min(value, max));
     }
 
     private EditText field(String hint) {
@@ -2170,7 +2034,7 @@ public final class MainActivity extends Activity {
     }
 
     private Button lockIconButton(boolean locked) {
-        Button button = iconButton(new LockIconDrawable(locked, dp(26), Color.WHITE));
+        Button button = iconButton(UiIcons.lock(locked, dp(26), Color.WHITE));
         button.setContentDescription(locked ? "解除锁定" : "锁定");
         button.setPadding(0, 0, 0, 0);
         return button;
@@ -2182,7 +2046,7 @@ public final class MainActivity extends Activity {
         }
         fullscreenButton.setCompoundDrawablesWithIntrinsicBounds(
                 null,
-                new FullscreenIconDrawable(fullscreen, dp(24), Color.WHITE),
+                UiIcons.fullscreen(fullscreen, dp(fullscreen ? 22 : 18), Color.WHITE),
                 null,
                 null);
         fullscreenButton.setContentDescription(fullscreen ? "退出全屏" : "全屏");
@@ -2271,6 +2135,12 @@ public final class MainActivity extends Activity {
     @Override
     public void onConfigurationChanged(Configuration newConfig) {
         super.onConfigurationChanged(newConfig);
+        if (isFullscreen) {
+            resolveThemeColors();
+            applyFullscreenSystemUiVisibility();
+            setFullscreen(true);
+            return;
+        }
         if (AppPreferences.THEME_SYSTEM.equals(themeMode) && !isPlaybackActive()) {
             recreate();
             return;
@@ -2296,8 +2166,8 @@ public final class MainActivity extends Activity {
             }
             return;
         }
-        if (floatingWindowView != null) {
-            hideFloatingWindow(false);
+        if (floatingWindowController != null && floatingWindowController.isShowing()) {
+            floatingWindowController.hide(false);
         }
     }
 
@@ -2311,7 +2181,9 @@ public final class MainActivity extends Activity {
     protected void onDestroy() {
         destroyed = true;
         getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-        hideFloatingWindow(true);
+        if (floatingWindowController != null) {
+            floatingWindowController.hide(true);
+        }
         if (player != null) {
             player.release();
             player = null;
@@ -2338,377 +2210,4 @@ public final class MainActivity extends Activity {
         super.onBackPressed();
     }
 
-    private abstract static class SimpleTextWatcher implements TextWatcher {
-        @Override
-        public void beforeTextChanged(CharSequence sequence, int start, int count, int after) {
-        }
-
-        @Override
-        public void onTextChanged(CharSequence sequence, int start, int before, int count) {
-        }
-    }
-
-    private interface PopupSelection {
-        void onSelect(int position);
-    }
-
-    private final class FloatingWindowTouchListener implements View.OnTouchListener {
-        private int startX;
-        private int startY;
-        private int startWidth;
-        private int startHeight;
-        private float downRawX;
-        private float downRawY;
-        private boolean resizing;
-        private boolean moved;
-
-        @Override
-        public boolean onTouch(View view, MotionEvent event) {
-            if (floatingWindowParams == null || overlayWindowManager == null || floatingWindowView == null) {
-                return false;
-            }
-            switch (event.getActionMasked()) {
-                case MotionEvent.ACTION_DOWN:
-                    startX = floatingWindowParams.x;
-                    startY = floatingWindowParams.y;
-                    startWidth = floatingWindowParams.width;
-                    startHeight = floatingWindowParams.height;
-                    downRawX = event.getRawX();
-                    downRawY = event.getRawY();
-                    resizing = event.getX() >= Math.max(0, view.getWidth() - dp(56))
-                            && event.getY() >= Math.max(0, view.getHeight() - dp(56));
-                    moved = false;
-                    return true;
-                case MotionEvent.ACTION_MOVE:
-                    int deltaX = Math.round(event.getRawX() - downRawX);
-                    int deltaY = Math.round(event.getRawY() - downRawY);
-                    moved = moved || Math.abs(deltaX) > dp(6) || Math.abs(deltaY) > dp(6);
-                    if (resizing) {
-                        resizeFloatingWindow(deltaX, deltaY);
-                    } else {
-                        moveFloatingWindow(deltaX, deltaY);
-                    }
-                    return true;
-                case MotionEvent.ACTION_UP:
-                case MotionEvent.ACTION_CANCEL:
-                    saveFloatingWindowBounds();
-                    if (!moved && event.getActionMasked() == MotionEvent.ACTION_UP) {
-                        returnFromFloatingWindowToFullscreen();
-                    }
-                    return true;
-                default:
-                    return false;
-            }
-        }
-
-        private void moveFloatingWindow(int deltaX, int deltaY) {
-            int screenWidth = getResources().getDisplayMetrics().widthPixels;
-            int screenHeight = getResources().getDisplayMetrics().heightPixels;
-            floatingWindowParams.x = clamp(startX + deltaX, 0, Math.max(0, screenWidth - floatingWindowParams.width));
-            floatingWindowParams.y = clamp(startY + deltaY, 0, Math.max(0, screenHeight - floatingWindowParams.height));
-            overlayWindowManager.updateViewLayout(floatingWindowView, floatingWindowParams);
-        }
-
-        private void resizeFloatingWindow(int deltaX, int deltaY) {
-            int screenWidth = getResources().getDisplayMetrics().widthPixels;
-            int screenHeight = getResources().getDisplayMetrics().heightPixels;
-            int maxWidth = Math.max(dp(220), screenWidth - floatingWindowParams.x);
-            int maxHeight = Math.max(dp(160), screenHeight - floatingWindowParams.y);
-            floatingWindowParams.width = clamp(startWidth + deltaX, dp(220), maxWidth);
-            floatingWindowParams.height = clamp(startHeight + deltaY, dp(160), maxHeight);
-            overlayWindowManager.updateViewLayout(floatingWindowView, floatingWindowParams);
-        }
-    }
-
-    private static final class CloseIconDrawable extends Drawable {
-        private final int size;
-        private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
-
-        CloseIconDrawable(int size, int color) {
-            this.size = size;
-            paint.setColor(color);
-            paint.setStyle(Paint.Style.STROKE);
-            paint.setStrokeCap(Paint.Cap.ROUND);
-            paint.setStrokeJoin(Paint.Join.ROUND);
-            paint.setStrokeWidth(Math.max(2f, size * 0.11f));
-        }
-
-        @Override
-        public void draw(Canvas canvas) {
-            RectF bounds = new RectF(getBounds());
-            float unit = Math.min(bounds.width(), bounds.height());
-            float left = bounds.left + (bounds.width() - unit) / 2f;
-            float top = bounds.top + (bounds.height() - unit) / 2f;
-            canvas.drawLine(
-                    left + unit * 0.28f,
-                    top + unit * 0.28f,
-                    left + unit * 0.72f,
-                    top + unit * 0.72f,
-                    paint);
-            canvas.drawLine(
-                    left + unit * 0.72f,
-                    top + unit * 0.28f,
-                    left + unit * 0.28f,
-                    top + unit * 0.72f,
-                    paint);
-        }
-
-        @Override
-        public void setAlpha(int alpha) {
-            paint.setAlpha(alpha);
-        }
-
-        @Override
-        public void setColorFilter(android.graphics.ColorFilter colorFilter) {
-            paint.setColorFilter(colorFilter);
-        }
-
-        @Override
-        public int getOpacity() {
-            return PixelFormat.TRANSLUCENT;
-        }
-
-        @Override
-        public int getIntrinsicWidth() {
-            return size;
-        }
-
-        @Override
-        public int getIntrinsicHeight() {
-            return size;
-        }
-    }
-
-    private static final class FullscreenIconDrawable extends Drawable {
-        private final boolean exit;
-        private final int size;
-        private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
-
-        FullscreenIconDrawable(boolean exit, int size, int color) {
-            this.exit = exit;
-            this.size = size;
-            paint.setColor(color);
-            paint.setStyle(Paint.Style.STROKE);
-            paint.setStrokeCap(Paint.Cap.SQUARE);
-            paint.setStrokeJoin(Paint.Join.MITER);
-            paint.setStrokeWidth(Math.max(2f, size * 0.09f));
-        }
-
-        @Override
-        public void draw(Canvas canvas) {
-            RectF bounds = new RectF(getBounds());
-            float unit = Math.min(bounds.width(), bounds.height());
-            float left = bounds.left + (bounds.width() - unit) / 2f;
-            float top = bounds.top + (bounds.height() - unit) / 2f;
-
-            if (exit) {
-                drawArrow(canvas, left + unit * 0.18f, top + unit * 0.18f,
-                        left + unit * 0.43f, top + unit * 0.43f,
-                        left + unit * 0.43f, top + unit * 0.28f,
-                        left + unit * 0.28f, top + unit * 0.43f);
-                drawArrow(canvas, left + unit * 0.82f, top + unit * 0.82f,
-                        left + unit * 0.57f, top + unit * 0.57f,
-                        left + unit * 0.57f, top + unit * 0.72f,
-                        left + unit * 0.72f, top + unit * 0.57f);
-            } else {
-                drawArrow(canvas, left + unit * 0.43f, top + unit * 0.43f,
-                        left + unit * 0.18f, top + unit * 0.18f,
-                        left + unit * 0.18f, top + unit * 0.34f,
-                        left + unit * 0.34f, top + unit * 0.18f);
-                drawArrow(canvas, left + unit * 0.57f, top + unit * 0.57f,
-                        left + unit * 0.82f, top + unit * 0.82f,
-                        left + unit * 0.82f, top + unit * 0.66f,
-                        left + unit * 0.66f, top + unit * 0.82f);
-            }
-        }
-
-        private void drawArrow(Canvas canvas, float startX, float startY, float endX, float endY,
-                               float headX1, float headY1, float headX2, float headY2) {
-            canvas.drawLine(startX, startY, endX, endY, paint);
-            canvas.drawLine(endX, endY, headX1, headY1, paint);
-            canvas.drawLine(endX, endY, headX2, headY2, paint);
-        }
-
-        @Override
-        public void setAlpha(int alpha) {
-            paint.setAlpha(alpha);
-        }
-
-        @Override
-        public void setColorFilter(android.graphics.ColorFilter colorFilter) {
-            paint.setColorFilter(colorFilter);
-        }
-
-        @Override
-        public int getOpacity() {
-            return PixelFormat.TRANSLUCENT;
-        }
-
-        @Override
-        public int getIntrinsicWidth() {
-            return size;
-        }
-
-        @Override
-        public int getIntrinsicHeight() {
-            return size;
-        }
-    }
-
-    private static final class LockIconDrawable extends Drawable {
-        private final boolean locked;
-        private final int size;
-        private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        private final Path shacklePath = new Path();
-        private final RectF body = new RectF();
-
-        LockIconDrawable(boolean locked, int size, int color) {
-            this.locked = locked;
-            this.size = size;
-            paint.setColor(color);
-            paint.setStyle(Paint.Style.STROKE);
-            paint.setStrokeCap(Paint.Cap.ROUND);
-            paint.setStrokeJoin(Paint.Join.ROUND);
-        }
-
-        @Override
-        public void draw(Canvas canvas) {
-            RectF bounds = new RectF(getBounds());
-            float width = bounds.width();
-            float height = bounds.height();
-            float unit = Math.min(width, height);
-            float centerX = bounds.centerX();
-            float centerY = bounds.centerY();
-            paint.setStrokeWidth(Math.max(2f, unit * 0.075f));
-
-            body.set(
-                    centerX - unit * 0.25f,
-                    centerY - unit * 0.02f,
-                    centerX + unit * 0.25f,
-                    centerY + unit * 0.30f);
-            canvas.drawRoundRect(body, unit * 0.055f, unit * 0.055f, paint);
-
-            shacklePath.reset();
-            if (locked) {
-                shacklePath.moveTo(centerX - unit * 0.18f, centerY - unit * 0.02f);
-                shacklePath.lineTo(centerX - unit * 0.18f, centerY - unit * 0.20f);
-                shacklePath.quadTo(centerX - unit * 0.18f, centerY - unit * 0.40f, centerX, centerY - unit * 0.40f);
-                shacklePath.quadTo(centerX + unit * 0.18f, centerY - unit * 0.40f, centerX + unit * 0.18f, centerY - unit * 0.20f);
-                shacklePath.lineTo(centerX + unit * 0.18f, centerY - unit * 0.02f);
-            } else {
-                shacklePath.moveTo(centerX - unit * 0.18f, centerY - unit * 0.02f);
-                shacklePath.lineTo(centerX - unit * 0.18f, centerY - unit * 0.20f);
-                shacklePath.quadTo(centerX - unit * 0.15f, centerY - unit * 0.39f, centerX + unit * 0.07f, centerY - unit * 0.37f);
-                shacklePath.lineTo(centerX + unit * 0.22f, centerY - unit * 0.27f);
-            }
-            canvas.drawPath(shacklePath, paint);
-
-            canvas.drawLine(centerX, centerY + unit * 0.10f, centerX, centerY + unit * 0.20f, paint);
-        }
-
-        @Override
-        public void setAlpha(int alpha) {
-            paint.setAlpha(alpha);
-        }
-
-        @Override
-        public void setColorFilter(android.graphics.ColorFilter colorFilter) {
-            paint.setColorFilter(colorFilter);
-        }
-
-        @Override
-        public int getOpacity() {
-            return PixelFormat.TRANSLUCENT;
-        }
-
-        @Override
-        public int getIntrinsicWidth() {
-            return size;
-        }
-
-        @Override
-        public int getIntrinsicHeight() {
-            return size;
-        }
-    }
-
-    private final class ThemedListAdapter extends ArrayAdapter<String> {
-        ThemedListAdapter(Context context) {
-            super(context, android.R.layout.simple_list_item_1, new ArrayList<>());
-        }
-
-        @Override
-        public View getView(int position, View convertView, ViewGroup parent) {
-            TextView view;
-            if (convertView instanceof TextView) {
-                view = (TextView) convertView;
-            } else {
-                view = new TextView(getContext());
-                view.setTextSize(14);
-                view.setGravity(Gravity.CENTER_VERTICAL);
-                view.setPadding(dp(getContext(), 14), 0, dp(getContext(), 14), 0);
-            }
-            view.setText(getItem(position));
-            view.setTextColor(colorText);
-            view.setBackground(roundRect(colorCard, 0));
-            view.setSingleLine(true);
-            view.setEllipsize(TextUtils.TruncateAt.END);
-            view.setLayoutParams(new AbsListView.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    dp(getContext(), 54)));
-            return view;
-        }
-
-        private static int dp(Context context, int value) {
-            float density = context.getResources().getDisplayMetrics().density;
-            return Math.round(value * density);
-        }
-    }
-
-    private final class SubscriptionListAdapter extends ArrayAdapter<String> {
-        SubscriptionListAdapter(Context context) {
-            super(context, android.R.layout.simple_list_item_1, new ArrayList<>());
-        }
-
-        @Override
-        public View getView(int position, View convertView, ViewGroup parent) {
-            TextView view;
-            LinearLayout container;
-            if (convertView instanceof LinearLayout
-                    && ((LinearLayout) convertView).getChildCount() > 0
-                    && ((LinearLayout) convertView).getChildAt(0) instanceof TextView) {
-                container = (LinearLayout) convertView;
-                view = (TextView) container.getChildAt(0);
-            } else {
-                container = new LinearLayout(getContext());
-                container.setOrientation(LinearLayout.VERTICAL);
-                container.setPadding(0, dp(getContext(), 4), 0, dp(getContext(), 4));
-                container.setLayoutParams(new AbsListView.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        ViewGroup.LayoutParams.WRAP_CONTENT));
-
-                view = new TextView(getContext());
-                view.setTextSize(14);
-                view.setPadding(dp(getContext(), 14), dp(getContext(), 12), dp(getContext(), 14), dp(getContext(), 12));
-                container.addView(view, new LinearLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        ViewGroup.LayoutParams.WRAP_CONTENT));
-            }
-            view.setText(getItem(position));
-            boolean selected = position < subscriptions.size()
-                    && subscriptions.get(position).id.equals(activeSubscriptionId);
-            view.setTextColor(selected ? COLOR_PRIMARY : colorText);
-            view.setTypeface(selected ? Typeface.DEFAULT_BOLD : Typeface.DEFAULT);
-            view.setBackground(selected
-                    ? roundRectWithStroke(0x262F7CFF, 18, COLOR_PRIMARY, 2)
-                    : roundRectWithStroke(colorCard, 18));
-            view.setSingleLine(false);
-            return container;
-        }
-
-        private static int dp(Context context, int value) {
-            float density = context.getResources().getDisplayMetrics().density;
-            return Math.round(value * density);
-        }
-    }
 }
