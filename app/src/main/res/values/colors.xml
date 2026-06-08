@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="primary">#2F7CFF</color>
+    <color name="primary_variant">#1A5FD9</color>
+    <color name="on_primary">#FFFFFF</color>
+    <color name="secondary">#5B9BFF</color>
+    <color name="on_secondary">#FFFFFF</color>
+    <color name="background">#F5F7FB</color>
+    <color name="surface">#FFFFFF</color>
+    <color name="surface_variant">#F0F3F9</color>
+    <color name="on_background">#101828</color>
+    <color name="on_surface">#101828</color>
+    <color name="on_surface_variant">#667085</color>
+    <color name="outline">#C6D0E0</color>
+    <color name="outline_variant">#E2E8F0</color>
+    <color name="error">#E85D75</color>
+    <color name="on_error">#FFFFFF</color>
+    <color name="surface_container">#FFFFFF</color>
+    <color name="surface_container_high">#F0F3F9</color>
+    <color name="inverse_surface">#1E293B</color>
+    <color name="inverse_on_surface">#F1F5F9</color>
+
+    <color name="nav_bar_color">#FFFFFF</color>
+    <color name="status_bar_color">@android:color/transparent</color>
+
+    <color name="player_overlay">#AA111827</color>
+    <color name="channel_selected_bg">#1A2F7CFF</color>
+    <color name="channel_play_btn_bg">#EAF1FF</color>
+</resources>

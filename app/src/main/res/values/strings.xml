@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">WagonLink</string>
+
+    <string name="tab_channels">频道</string>
+    <string name="tab_subscriptions">订阅</string>
+    <string name="tab_settings">设置</string>
+
+    <string name="no_subscription_selected">未选择订阅</string>
+    <string name="select_subscription">选择订阅源</string>
+    <string name="refresh">刷新</string>
+    <string name="all_groups">全部</string>
+    <string name="search_channels">搜索频道</string>
+    <string name="no_channels">暂无频道</string>
+    <string name="no_channels_hint">暂无频道\n请在订阅页添加订阅源或刷新当前订阅</string>
+    <string name="channel_count_format">%1$d 个频道</string>
+    <string name="channel_filter_count_format">%1$d / %2$d 个频道</string>
+    <string name="add_subscription_hint">在订阅页添加订阅源</string>
+    <string name="select_channel_to_play">选择频道后开始播放</string>
+
+    <string name="connecting_format">正在连接: %1$s</string>
+    <string name="playing_format">正在播放: %1$s</string>
+    <string name="play_failed_format">播放失败: %1$s</string>
+    <string name="connection_failed">频道连接失败</string>
+    <string name="connection_timeout">连接超时，请换一个频道或稍后再试</string>
+    <string name="channel_url_empty">频道地址为空</string>
+    <string name="playing">播放中</string>
+    <string name="play">播放</string>
+    <string name="playing_group_format">正在播放 | %1$s</string>
+
+    <string name="subscription_title">订阅</string>
+    <string name="add_subscription">新增订阅</string>
+    <string name="edit_subscription">编辑订阅</string>
+    <string name="subscription_hint">点按加载订阅，长按可编辑或删除。右上角 + 可新增。</string>
+    <string name="no_subscriptions">暂无订阅，点击右上角 + 新增。</string>
+    <string name="subscription_name_hint">订阅名称，可不填</string>
+    <string name="subscription_url_hint">订阅链接</string>
+    <string name="save_and_load">保存并加载</string>
+    <string name="delete">删除</string>
+    <string name="enter_url">请输入订阅链接</string>
+    <string name="saved_format">已保存并切换到 %1$s</string>
+    <string name="deleted_format">已删除 %1$s</string>
+    <string name="subscription_not_found">订阅不存在</string>
+    <string name="select_to_delete">请选择要删除的订阅</string>
+    <string name="current_subscription_format">当前订阅: %1$s</string>
+
+    <string name="load_subscription">加载订阅</string>
+    <string name="edit">编辑</string>
+    <string name="select_group">选择分类</string>
+
+    <string name="loading_subscription">正在加载订阅…</string>
+    <string name="parsing_channels">正在解析频道</string>
+    <string name="loaded_from_cache">已从缓存载入频道</string>
+    <string name="parsed_format">已解析 %1$d 个频道</string>
+    <string name="no_playable_channels">没有解析到可播放频道</string>
+    <string name="load_failed">加载失败</string>
+    <string name="add_subscription_first">请先在订阅页添加或选择订阅源</string>
+
+    <string name="settings_title">设置</string>
+    <string name="settings_subtitle">外观、版本和基础偏好设置。</string>
+    <string name="appearance">外观</string>
+    <string name="theme_mode">主题模式</string>
+    <string name="theme_system">跟随系统</string>
+    <string name="theme_light">日间模式</string>
+    <string name="theme_dark">夜间模式</string>
+    <string name="version_format">当前版本: %1$s</string>
+    <string name="playback">播放</string>
+    <string name="floating_window_title">返回时自动进入悬浮窗</string>
+    <string name="floating_window_detail">开启后，播放中返回桌面会自动显示小窗</string>
+    <string name="floating_window_enabled">已开启悬浮窗，播放时返回桌面会自动进入小窗</string>
+    <string name="floating_window_no_permission">未获得悬浮窗权限</string>
+    <string name="floating_window_request">请允许 WagonLink 显示在其他应用上层</string>
+
+    <string name="fullscreen">全屏</string>
+    <string name="exit_fullscreen">退出全屏</string>
+    <string name="lock">锁定</string>
+    <string name="unlock">解除锁定</string>
+    <string name="close_floating_window">关闭悬浮窗</string>
+</resources>
