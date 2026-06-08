@@ -26,9 +26,11 @@ public final class ChannelFragment extends Fragment {
         void onRefreshRequested();
         void onChannelSelected(Channel channel);
         void onFullscreenRequested(boolean enter);
-        void onPlayerTapped();
         void onLockRequested();
         void onUnlockRequested();
+        void onControllerVisibilityChanged(boolean visible);
+        boolean isFullscreenLocked();
+        boolean isFullscreen();
         String getActiveSourceName();
         String getSelectedChannelUrl();
     }
@@ -94,13 +96,6 @@ public final class ChannelFragment extends Fragment {
             if (host != null) host.onFullscreenRequested(true);
         });
 
-        binding.playerContainer.setOnClickListener(v -> {
-            if (host != null) host.onPlayerTapped();
-        });
-        binding.playerView.setOnClickListener(v -> {
-            if (host != null) host.onPlayerTapped();
-        });
-
         binding.lockButton.setImageDrawable(UiIcons.lock(false, dp(26), 0xFFFFFFFF));
         binding.lockButton.setOnClickListener(v -> {
             if (host != null) host.onLockRequested();
@@ -108,6 +103,20 @@ public final class ChannelFragment extends Fragment {
         binding.unlockButton.setImageDrawable(UiIcons.lock(true, dp(26), 0xFFFFFFFF));
         binding.unlockButton.setOnClickListener(v -> {
             if (host != null) host.onUnlockRequested();
+        });
+
+        binding.playerView.setControllerVisibilityListener(
+                (androidx.media3.ui.PlayerView.ControllerVisibilityListener) visibility -> {
+                    if (host != null) {
+                        host.onControllerVisibilityChanged(visibility == View.VISIBLE);
+                    }
+                });
+
+        binding.playerContainer.setOnClickListener(v -> {
+            if (host != null && host.isFullscreen() && host.isFullscreenLocked()) {
+                binding.unlockButton.setVisibility(
+                        binding.unlockButton.getVisibility() == View.VISIBLE ? View.GONE : View.VISIBLE);
+            }
         });
 
         updateEmptyState();

@@ -26,14 +26,21 @@
             android:textSize="22sp"
             android:textStyle="bold" />
 
-        <com.google.android.material.floatingactionbutton.FloatingActionButton
+        <com.google.android.material.button.MaterialButton
             android:id="@+id/add_subscription_button"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
+            style="@style/Widget.Material3.Button.IconButton.Filled.Tonal"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
             android:contentDescription="@string/add_subscription"
-            android:src="@drawable/ic_add"
-            app:fabSize="mini"
-            app:elevation="2dp" />
+            app:icon="@drawable/ic_add"
+            app:iconSize="20dp"
+            app:iconGravity="textStart"
+            app:iconPadding="0dp"
+            android:insetTop="0dp"
+            android:insetBottom="0dp"
+            android:insetLeft="0dp"
+            android:insetRight="0dp"
+            android:padding="0dp" />
     </LinearLayout>
 
     <TextView

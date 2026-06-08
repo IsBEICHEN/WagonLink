@@ -78,9 +78,6 @@ public final class MainActivity extends AppCompatActivity
     private String selectedChannelName = "";
     private String themeMode = AppPreferences.THEME_SYSTEM;
 
-    private final Runnable hideFullscreenControlsRunnable = () -> {
-        if (isFullscreen) setFullscreenControlsVisible(false);
-    };
     private final Runnable enterFloatingWindowRunnable = this::enterFloatingWindowIfNeeded;
 
     @Override
@@ -253,35 +250,55 @@ public final class MainActivity extends AppCompatActivity
     }
 
     @Override
-    public void onPlayerTapped() {
-        hideKeyboard();
-        if (!isFullscreen) return;
-        if (fullscreenLocked) {
-            setFullscreenControlsVisible(true);
-            return;
-        }
-        setFullscreenControlsVisible(!fullscreenControlsVisible);
-    }
-
-    @Override
     public void onLockRequested() {
         if (!isFullscreen) return;
         fullscreenLocked = true;
-        fullscreenControlsVisible = true;
-        if (channelFragment != null) channelFragment.hideVideoFeedback();
-        applyFullscreenControlState();
-        mainHandler.removeCallbacks(hideFullscreenControlsRunnable);
-        mainHandler.postDelayed(hideFullscreenControlsRunnable, FULLSCREEN_CONTROLS_TIMEOUT_MS);
+        if (channelFragment != null) {
+            channelFragment.hideVideoFeedback();
+            PlayerView pv = channelFragment.getPlayerView();
+            if (pv != null) { pv.hideController(); pv.setUseController(false); }
+            View fsBtn = channelFragment.getFullscreenButton();
+            View lockBtn = channelFragment.getLockButton();
+            if (fsBtn != null) fsBtn.setVisibility(View.GONE);
+            if (lockBtn != null) lockBtn.setVisibility(View.GONE);
+        }
     }
 
     @Override
     public void onUnlockRequested() {
         if (!isFullscreen) return;
         fullscreenLocked = false;
-        fullscreenControlsVisible = true;
-        applyFullscreenControlState();
-        mainHandler.removeCallbacks(hideFullscreenControlsRunnable);
-        mainHandler.postDelayed(hideFullscreenControlsRunnable, FULLSCREEN_CONTROLS_TIMEOUT_MS);
+        if (channelFragment != null) {
+            PlayerView pv = channelFragment.getPlayerView();
+            if (pv != null) {
+                pv.setUseController(true);
+                pv.showController();
+            }
+            View unlockBtn = channelFragment.getUnlockButton();
+            if (unlockBtn != null) unlockBtn.setVisibility(View.GONE);
+        }
+    }
+
+    @Override
+    public void onControllerVisibilityChanged(boolean visible) {
+        if (!isFullscreen || fullscreenLocked || channelFragment == null) return;
+        fullscreenControlsVisible = visible;
+        View fsBtn = channelFragment.getFullscreenButton();
+        View lockBtn = channelFragment.getLockButton();
+        View infoText = channelFragment.getFullscreenInfoText();
+        if (fsBtn != null) fsBtn.setVisibility(visible ? View.VISIBLE : View.GONE);
+        if (lockBtn != null) lockBtn.setVisibility(visible ? View.VISIBLE : View.GONE);
+        if (infoText != null) infoText.setVisibility(visible && !selectedChannelName.isEmpty() ? View.VISIBLE : View.GONE);
+    }
+
+    @Override
+    public boolean isFullscreenLocked() {
+        return fullscreenLocked;
+    }
+
+    @Override
+    public boolean isFullscreen() {
+        return isFullscreen;
     }
 
     @Override
@@ -618,7 +635,6 @@ public final class MainActivity extends AppCompatActivity
         isFullscreen = fullscreen;
         fullscreenControlsVisible = false;
         fullscreenLocked = false;
-        mainHandler.removeCallbacks(hideFullscreenControlsRunnable);
 
         if (channelFragment == null) return;
 
@@ -683,20 +699,6 @@ public final class MainActivity extends AppCompatActivity
         }
 
         applyFullscreenControlState();
-
-        if (fullscreen) {
-            mainHandler.postDelayed(() -> {
-                if (isFullscreen && !fullscreenLocked) setFullscreenControlsVisible(false);
-            }, 250);
-        }
-    }
-
-    private void setFullscreenControlsVisible(boolean visible) {
-        if (!isFullscreen) return;
-        fullscreenControlsVisible = visible;
-        applyFullscreenControlState();
-        mainHandler.removeCallbacks(hideFullscreenControlsRunnable);
-        if (visible) mainHandler.postDelayed(hideFullscreenControlsRunnable, FULLSCREEN_CONTROLS_TIMEOUT_MS);
     }
 
     private void applyFullscreenControlState() {
@@ -707,36 +709,29 @@ public final class MainActivity extends AppCompatActivity
         PlayerView pv = channelFragment.getPlayerView();
 
         if (!isFullscreen) {
+            fullscreenControlsVisible = false;
+            fullscreenLocked = false;
             if (fsBtn != null) fsBtn.setVisibility(View.VISIBLE);
             if (lockBtn != null) lockBtn.setVisibility(View.GONE);
             if (unlockBtn != null) unlockBtn.setVisibility(View.GONE);
-            if (pv != null) { pv.setUseController(true); pv.setControllerAutoShow(true); }
+            if (pv != null) {
+                pv.setUseController(true);
+                pv.setControllerAutoShow(true);
+                pv.setControllerShowTimeoutMs(FULLSCREEN_CONTROLS_TIMEOUT_MS);
+            }
             return;
         }
 
-        if (pv != null) pv.setControllerAutoShow(false);
+        if (fsBtn != null) fsBtn.setVisibility(View.GONE);
+        if (lockBtn != null) lockBtn.setVisibility(View.GONE);
+        if (unlockBtn != null) unlockBtn.setVisibility(View.GONE);
 
-        if (fullscreenLocked) {
-            if (fsBtn != null) fsBtn.setVisibility(View.GONE);
-            if (lockBtn != null) lockBtn.setVisibility(View.GONE);
-            if (unlockBtn != null) {
-                unlockBtn.setVisibility(fullscreenControlsVisible ? View.VISIBLE : View.GONE);
-                unlockBtn.bringToFront();
-            }
-            if (pv != null) { pv.hideController(); pv.setUseController(false); }
-        } else {
-            if (fsBtn != null) {
-                fsBtn.setVisibility(fullscreenControlsVisible ? View.VISIBLE : View.GONE);
-                fsBtn.bringToFront();
-            }
-            if (lockBtn != null) {
-                lockBtn.setVisibility(fullscreenControlsVisible ? View.VISIBLE : View.GONE);
-                lockBtn.bringToFront();
-            }
-            if (unlockBtn != null) unlockBtn.setVisibility(View.GONE);
-            if (pv != null) {
-                if (fullscreenControlsVisible) { pv.setUseController(true); pv.showController(); }
-                else { pv.hideController(); pv.setUseController(false); }
+        if (pv != null) {
+            pv.setUseController(!fullscreenLocked);
+            pv.setControllerAutoShow(false);
+            pv.setControllerShowTimeoutMs(FULLSCREEN_CONTROLS_TIMEOUT_MS);
+            if (!fullscreenLocked) {
+                pv.hideController();
             }
         }
     }
