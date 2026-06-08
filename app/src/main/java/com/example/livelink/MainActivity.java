@@ -257,9 +257,7 @@ public final class MainActivity extends AppCompatActivity
             channelFragment.hideVideoFeedback();
             PlayerView pv = channelFragment.getPlayerView();
             if (pv != null) { pv.hideController(); pv.setUseController(false); }
-            View fsBtn = channelFragment.getFullscreenButton();
             View lockBtn = channelFragment.getLockButton();
-            if (fsBtn != null) fsBtn.setVisibility(View.GONE);
             if (lockBtn != null) lockBtn.setVisibility(View.GONE);
         }
     }
@@ -283,10 +281,8 @@ public final class MainActivity extends AppCompatActivity
     public void onControllerVisibilityChanged(boolean visible) {
         if (!isFullscreen || fullscreenLocked || channelFragment == null) return;
         fullscreenControlsVisible = visible;
-        View fsBtn = channelFragment.getFullscreenButton();
         View lockBtn = channelFragment.getLockButton();
         View infoText = channelFragment.getFullscreenInfoText();
-        if (fsBtn != null) fsBtn.setVisibility(visible ? View.VISIBLE : View.GONE);
         if (lockBtn != null) lockBtn.setVisibility(visible ? View.VISIBLE : View.GONE);
         if (infoText != null) infoText.setVisibility(visible && !selectedChannelName.isEmpty() ? View.VISIBLE : View.GONE);
     }
@@ -671,10 +667,9 @@ public final class MainActivity extends AppCompatActivity
             View fragmentRoot = channelFragment.getView();
             if (fragmentRoot instanceof ViewGroup) {
                 ViewGroup fragmentLayout = (ViewGroup) fragmentRoot;
-                int density = (int) getResources().getDisplayMetrics().density;
                 android.widget.LinearLayout.LayoutParams plp = new android.widget.LinearLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT, 180 * density);
-                plp.setMargins(12 * density, 0, 12 * density, 8 * density);
+                        ViewGroup.LayoutParams.MATCH_PARENT, dp(180));
+                plp.setMargins(dp(12), 0, dp(12), dp(8));
                 fragmentLayout.addView(playerContainer, 1, plp);
             }
         }
@@ -703,7 +698,6 @@ public final class MainActivity extends AppCompatActivity
 
     private void applyFullscreenControlState() {
         if (channelFragment == null) return;
-        View fsBtn = channelFragment.getFullscreenButton();
         View lockBtn = channelFragment.getLockButton();
         View unlockBtn = channelFragment.getUnlockButton();
         PlayerView pv = channelFragment.getPlayerView();
@@ -711,7 +705,6 @@ public final class MainActivity extends AppCompatActivity
         if (!isFullscreen) {
             fullscreenControlsVisible = false;
             fullscreenLocked = false;
-            if (fsBtn != null) fsBtn.setVisibility(View.VISIBLE);
             if (lockBtn != null) lockBtn.setVisibility(View.GONE);
             if (unlockBtn != null) unlockBtn.setVisibility(View.GONE);
             if (pv != null) {
@@ -722,7 +715,6 @@ public final class MainActivity extends AppCompatActivity
             return;
         }
 
-        if (fsBtn != null) fsBtn.setVisibility(View.GONE);
         if (lockBtn != null) lockBtn.setVisibility(View.GONE);
         if (unlockBtn != null) unlockBtn.setVisibility(View.GONE);
 
@@ -832,6 +824,10 @@ public final class MainActivity extends AppCompatActivity
         if (view == null) return;
         InputMethodManager imm = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
         if (imm != null) imm.hideSoftInputFromWindow(view.getWindowToken(), 0);
+    }
+
+    private int dp(int value) {
+        return Math.round(value * getResources().getDisplayMetrics().density);
     }
 
     // ---- Lifecycle ----

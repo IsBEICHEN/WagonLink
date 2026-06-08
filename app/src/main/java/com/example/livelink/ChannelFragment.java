@@ -6,6 +6,7 @@ import android.text.Editable;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
+import android.widget.ImageButton;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
@@ -38,6 +39,8 @@ public final class ChannelFragment extends Fragment {
     private FragmentChannelBinding binding;
     private ChannelListAdapter adapter;
     private Host host;
+    private ImageButton fullscreenButton;
+    private ImageButton minimalFullscreenButton;
 
     private final List<Channel> allChannels = new ArrayList<>();
     private final List<Channel> filteredChannels = new ArrayList<>();
@@ -91,10 +94,9 @@ public final class ChannelFragment extends Fragment {
             }
         });
 
-        binding.fullscreenButton.setImageDrawable(UiIcons.fullscreen(false, dp(18), 0xFFFFFFFF));
-        binding.fullscreenButton.setOnClickListener(v -> {
-            if (host != null) host.onFullscreenRequested(true);
-        });
+        bindFullscreenControls();
+        binding.playerView.post(this::bindFullscreenControls);
+        updateFullscreenButtonIcon(false);
 
         binding.lockButton.setImageDrawable(UiIcons.lock(false, dp(26), 0xFFFFFFFF));
         binding.lockButton.setOnClickListener(v -> {
@@ -120,6 +122,24 @@ public final class ChannelFragment extends Fragment {
         });
 
         updateEmptyState();
+    }
+
+    private void bindFullscreenControls() {
+        if (binding == null) return;
+        fullscreenButton = binding.playerView.findViewById(androidx.media3.ui.R.id.exo_fullscreen);
+        minimalFullscreenButton = binding.playerView.findViewById(androidx.media3.ui.R.id.exo_minimal_fullscreen);
+        View.OnClickListener fullscreenClickListener = v -> {
+            if (host != null) host.onFullscreenRequested(!host.isFullscreen());
+        };
+        if (fullscreenButton != null) {
+            fullscreenButton.setVisibility(View.VISIBLE);
+            fullscreenButton.setOnClickListener(fullscreenClickListener);
+        }
+        if (minimalFullscreenButton != null) {
+            minimalFullscreenButton.setVisibility(View.VISIBLE);
+            minimalFullscreenButton.setOnClickListener(fullscreenClickListener);
+        }
+        updateFullscreenButtonIcon(host != null && host.isFullscreen());
     }
 
     public void setChannels(List<Channel> channels) {
@@ -222,10 +242,6 @@ public final class ChannelFragment extends Fragment {
         return binding != null ? binding.emptyStateText : null;
     }
 
-    public View getFullscreenButton() {
-        return binding != null ? binding.fullscreenButton : null;
-    }
-
     public View getLockButton() {
         return binding != null ? binding.lockButton : null;
     }
@@ -240,16 +256,18 @@ public final class ChannelFragment extends Fragment {
 
     public void updateFullscreenButtonIcon(boolean isFullscreen) {
         if (binding == null) return;
-        binding.fullscreenButton.setImageDrawable(
-                UiIcons.fullscreen(isFullscreen, dp(isFullscreen ? 22 : 18), 0xFFFFFFFF));
-        binding.fullscreenButton.setContentDescription(
-                getString(isFullscreen ? R.string.exit_fullscreen : R.string.fullscreen));
-        android.widget.FrameLayout.LayoutParams lp =
-                (android.widget.FrameLayout.LayoutParams) binding.fullscreenButton.getLayoutParams();
-        lp.width = dp(isFullscreen ? 40 : 36);
-        lp.height = dp(isFullscreen ? 40 : 36);
-        lp.setMargins(0, 0, dp(isFullscreen ? 72 : 8), dp(isFullscreen ? 0 : 8));
-        binding.fullscreenButton.setLayoutParams(lp);
+        int icon = isFullscreen
+                ? androidx.media3.ui.R.drawable.exo_styled_controls_fullscreen_exit
+                : androidx.media3.ui.R.drawable.exo_styled_controls_fullscreen_enter;
+        String description = getString(isFullscreen ? R.string.exit_fullscreen : R.string.fullscreen);
+        updateFullscreenButton(fullscreenButton, icon, description);
+        updateFullscreenButton(minimalFullscreenButton, icon, description);
+    }
+
+    private void updateFullscreenButton(ImageButton button, int icon, String description) {
+        if (button == null) return;
+        button.setImageResource(icon);
+        button.setContentDescription(description);
     }
 
     private void applyFilters() {
@@ -296,6 +314,8 @@ public final class ChannelFragment extends Fragment {
     @Override
     public void onDestroyView() {
         super.onDestroyView();
+        fullscreenButton = null;
+        minimalFullscreenButton = null;
         binding = null;
     }
 }
