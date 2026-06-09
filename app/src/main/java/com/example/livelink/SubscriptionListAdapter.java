@@ -22,10 +22,15 @@ public final class SubscriptionListAdapter extends RecyclerView.Adapter<Subscrip
         void onLongClick(int position);
     }
 
+    public interface OnSubscriptionRefreshClickListener {
+        void onRefreshClick(int position);
+    }
+
     private final List<Subscription> subscriptions = new ArrayList<>();
     private String activeId = "";
     private OnSubscriptionClickListener clickListener;
     private OnSubscriptionLongClickListener longClickListener;
+    private OnSubscriptionRefreshClickListener refreshClickListener;
 
     public void setOnClickListener(OnSubscriptionClickListener listener) {
         this.clickListener = listener;
@@ -33,6 +38,10 @@ public final class SubscriptionListAdapter extends RecyclerView.Adapter<Subscrip
 
     public void setOnLongClickListener(OnSubscriptionLongClickListener listener) {
         this.longClickListener = listener;
+    }
+
+    public void setOnRefreshClickListener(OnSubscriptionRefreshClickListener listener) {
+        this.refreshClickListener = listener;
     }
 
     public void setSubscriptions(List<Subscription> newSubscriptions) {
@@ -79,14 +88,28 @@ public final class SubscriptionListAdapter extends RecyclerView.Adapter<Subscrip
 
         holder.itemView.setOnClickListener(v -> {
             if (clickListener != null) {
-                clickListener.onClick(holder.getAdapterPosition());
+                int adapterPosition = holder.getAdapterPosition();
+                if (adapterPosition != RecyclerView.NO_POSITION) {
+                    clickListener.onClick(adapterPosition);
+                }
             }
         });
         holder.itemView.setOnLongClickListener(v -> {
             if (longClickListener != null) {
-                longClickListener.onLongClick(holder.getAdapterPosition());
+                int adapterPosition = holder.getAdapterPosition();
+                if (adapterPosition != RecyclerView.NO_POSITION) {
+                    longClickListener.onLongClick(adapterPosition);
+                }
             }
             return true;
+        });
+        holder.binding.refreshSubscriptionButton.setOnClickListener(v -> {
+            if (refreshClickListener != null) {
+                int adapterPosition = holder.getAdapterPosition();
+                if (adapterPosition != RecyclerView.NO_POSITION) {
+                    refreshClickListener.onRefreshClick(adapterPosition);
+                }
+            }
         });
     }
 

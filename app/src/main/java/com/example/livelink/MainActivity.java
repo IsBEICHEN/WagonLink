@@ -320,6 +320,12 @@ public final class MainActivity extends AppCompatActivity
     }
 
     @Override
+    public void onRefreshSubscription(int position) {
+        if (position < 0 || position >= subscriptions.size()) return;
+        refreshSubscription(subscriptions.get(position));
+    }
+
+    @Override
     public void onEditSubscription(int position) {
         if (position < 0 || position >= subscriptions.size()) return;
         if (subscriptionFragment != null) {
@@ -388,6 +394,7 @@ public final class MainActivity extends AppCompatActivity
         Subscription subscription = subscriptions.get(position);
         List<String> actions = new ArrayList<>();
         actions.add(getString(R.string.load_subscription));
+        actions.add(getString(R.string.refresh));
         actions.add(getString(R.string.edit));
         actions.add(getString(R.string.delete));
         showChoicePanel(subscription.name, actions, selected -> {
@@ -395,8 +402,10 @@ public final class MainActivity extends AppCompatActivity
                 selectSubscription(subscription);
                 binding.bottomNav.setSelectedItemId(R.id.nav_channels);
             } else if (selected == 1) {
-                if (subscriptionFragment != null) subscriptionFragment.showEditor(subscription);
+                refreshSubscription(subscription);
             } else if (selected == 2) {
+                if (subscriptionFragment != null) subscriptionFragment.showEditor(subscription);
+            } else if (selected == 3) {
                 onDeleteSubscription(subscription.id);
             }
         });
@@ -460,6 +469,23 @@ public final class MainActivity extends AppCompatActivity
         }
         if (subscriptionFragment != null) subscriptionFragment.refreshList();
         loadSubscription(false);
+    }
+
+    private void refreshSubscription(Subscription subscription) {
+        activeSubscriptionId = subscription.id;
+        activeSubscriptionUrl = subscription.url;
+        AppPreferences.saveLastSubscriptionId(this, subscription.id);
+        ChannelCache.delete(this, subscription.id);
+        if (channelFragment != null) {
+            channelFragment.setSubscriptionPickerText(subscription.name);
+            channelFragment.setActiveSourceText(subscription.name);
+            channelFragment.setStatusText(getString(R.string.loading_subscription));
+        }
+        if (subscriptionFragment != null) {
+            subscriptionFragment.setStatusText(getString(R.string.loading_subscription));
+            subscriptionFragment.refreshList();
+        }
+        loadSubscription(true);
     }
 
     private void reloadSubscriptions(String selectedId) {
@@ -542,14 +568,22 @@ public final class MainActivity extends AppCompatActivity
                                 ? getString(R.string.no_playable_channels)
                                 : getString(R.string.parsed_format, allChannels.size()));
                     }
+                    if (forceRefresh && subscriptionFragment != null) {
+                        subscriptionFragment.setStatusText(allChannels.isEmpty()
+                                ? getString(R.string.no_playable_channels)
+                                : getString(R.string.parsed_format, allChannels.size()));
+                    }
                 });
             } catch (Exception e) {
                 mainHandler.post(() -> {
                     if (destroyed) return;
+                    String message = e.getMessage() == null ? getString(R.string.load_failed) : e.getMessage();
                     if (channelFragment != null) {
                         channelFragment.setLoading(false);
-                        channelFragment.setStatusText(
-                                e.getMessage() == null ? getString(R.string.load_failed) : e.getMessage());
+                        channelFragment.setStatusText(message);
+                    }
+                    if (forceRefresh && subscriptionFragment != null) {
+                        subscriptionFragment.setStatusText(message);
                     }
                 });
             }

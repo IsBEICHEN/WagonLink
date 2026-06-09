@@ -24,6 +24,7 @@ public final class SubscriptionFragment extends Fragment {
 
     public interface Host {
         void onLoadSubscription(int position);
+        void onRefreshSubscription(int position);
         void onEditSubscription(int position);
         void onDeleteSubscription(String id);
         void onSaveSubscription(String id, String name, String url);
@@ -58,6 +59,9 @@ public final class SubscriptionFragment extends Fragment {
         });
         adapter.setOnLongClickListener(position -> {
             if (host != null) host.onShowSubscriptionActions(position);
+        });
+        adapter.setOnRefreshClickListener(position -> {
+            if (host != null) host.onRefreshSubscription(position);
         });
 
         binding.subscriptionList.setLayoutManager(new LinearLayoutManager(requireContext()));

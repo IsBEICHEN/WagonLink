@@ -59,5 +59,16 @@
             android:layout_marginStart="8dp"
             android:background="@drawable/bg_active_dot"
             android:visibility="gone" />
+
+        <ImageButton
+            android:id="@+id/refresh_subscription_button"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:layout_marginStart="8dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="@string/refresh"
+            android:padding="8dp"
+            android:scaleType="center"
+            android:src="@drawable/ic_refresh" />
     </LinearLayout>
 </com.google.android.material.card.MaterialCardView>
