@@ -1,0 +1,4 @@
+﻿<?xml version='1.0' encoding='utf-8' standalone='yes' ?>
+<map>
+    <string name="subscriptions">[{&quot;id&quot;:&quot;test-gntv&quot;,&quot;name&quot;:&quot;测试 GNTV&quot;,&quot;url&quot;:&quot;https:\/\/raw.githubusercontent.com\/YueChan\/Live\/refs\/heads\/main\/GNTV.m3u&quot;}]</string>
+</map>
