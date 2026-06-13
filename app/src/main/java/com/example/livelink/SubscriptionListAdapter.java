@@ -1,107 +1,139 @@
 package com.example.livelink;
 
-import android.content.Context;
-import android.graphics.Typeface;
-import android.graphics.drawable.GradientDrawable;
+import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
-import android.widget.AbsListView;
-import android.widget.ArrayAdapter;
-import android.widget.LinearLayout;
-import android.widget.TextView;
+
+import androidx.annotation.NonNull;
+import androidx.recyclerview.widget.RecyclerView;
+
+import com.example.livelink.databinding.ItemSubscriptionBinding;
 
 import java.util.ArrayList;
 import java.util.List;
 
-final class SubscriptionListAdapter extends ArrayAdapter<String> {
-    interface StringProvider {
-        String get();
+public final class SubscriptionListAdapter extends RecyclerView.Adapter<SubscriptionListAdapter.ViewHolder> {
+
+    public interface OnSubscriptionClickListener {
+        void onClick(int position);
     }
 
-    interface ColorProvider {
-        int get();
+    public interface OnSubscriptionLongClickListener {
+        void onLongClick(int position);
     }
 
-    private final List<Subscription> subscriptions;
-    private final StringProvider activeIdProvider;
-    private final int primaryColor;
-    private final ColorProvider textColorProvider;
-    private final ColorProvider cardColorProvider;
+    public interface OnSubscriptionRefreshClickListener {
+        void onRefreshClick(int position);
+    }
 
-    SubscriptionListAdapter(
-            Context context,
-            List<Subscription> subscriptions,
-            StringProvider activeIdProvider,
-            int primaryColor,
-            ColorProvider textColorProvider,
-            ColorProvider cardColorProvider) {
-        super(context, android.R.layout.simple_list_item_1, new ArrayList<>());
-        this.subscriptions = subscriptions;
-        this.activeIdProvider = activeIdProvider;
-        this.primaryColor = primaryColor;
-        this.textColorProvider = textColorProvider;
-        this.cardColorProvider = cardColorProvider;
+    private final List<Subscription> subscriptions = new ArrayList<>();
+    private String activeId = "";
+    private OnSubscriptionClickListener clickListener;
+    private OnSubscriptionLongClickListener longClickListener;
+    private OnSubscriptionRefreshClickListener refreshClickListener;
+
+    public void setOnClickListener(OnSubscriptionClickListener listener) {
+        this.clickListener = listener;
+    }
+
+    public void setOnLongClickListener(OnSubscriptionLongClickListener listener) {
+        this.longClickListener = listener;
+    }
+
+    public void setOnRefreshClickListener(OnSubscriptionRefreshClickListener listener) {
+        this.refreshClickListener = listener;
+    }
+
+    public void setSubscriptions(List<Subscription> newSubscriptions) {
+        subscriptions.clear();
+        subscriptions.addAll(newSubscriptions);
+        notifyDataSetChanged();
+    }
+
+    public void setActiveId(String id) {
+        String oldId = this.activeId;
+        this.activeId = id == null ? "" : id;
+        if (!oldId.equals(this.activeId)) {
+            notifyDataSetChanged();
+        }
+    }
+
+    @NonNull
+    @Override
+    public ViewHolder onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
+        ItemSubscriptionBinding binding = ItemSubscriptionBinding.inflate(
+                LayoutInflater.from(parent.getContext()), parent, false);
+        return new ViewHolder(binding);
     }
 
     @Override
-    public View getView(int position, View convertView, ViewGroup parent) {
-        LinearLayout container;
-        TextView label;
-        if (convertView instanceof LinearLayout
-                && ((LinearLayout) convertView).getChildCount() > 0
-                && ((LinearLayout) convertView).getChildAt(0) instanceof TextView) {
-            container = (LinearLayout) convertView;
-            label = (TextView) container.getChildAt(0);
-        } else {
-            container = new LinearLayout(getContext());
-            container.setOrientation(LinearLayout.VERTICAL);
-            container.setPadding(0, dp(4), 0, dp(4));
-            container.setLayoutParams(new AbsListView.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.WRAP_CONTENT));
+    public void onBindViewHolder(@NonNull ViewHolder holder, int position) {
+        Subscription subscription = subscriptions.get(position);
+        boolean selected = subscription.id.equals(activeId);
 
-            label = new TextView(getContext());
-            label.setTextSize(14);
-            label.setPadding(dp(14), dp(12), dp(14), dp(12));
-            label.setSingleLine(false);
-            container.addView(label, new LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.WRAP_CONTENT));
+        holder.binding.subscriptionName.setText(subscription.name);
+        holder.binding.subscriptionUrl.setText(subscription.url);
+
+        if (selected) {
+            holder.binding.subscriptionCard.setStrokeColor(
+                    holder.itemView.getContext().getColor(R.color.primary));
+            holder.binding.subscriptionCard.setStrokeWidth(dp(holder.itemView, 2));
+            holder.binding.activeIndicator.setVisibility(View.VISIBLE);
+        } else {
+            holder.binding.subscriptionCard.setStrokeColor(
+                    resolveAttrColor(holder.itemView, com.google.android.material.R.attr.colorOutlineVariant));
+            holder.binding.subscriptionCard.setStrokeWidth(dp(holder.itemView, 1));
+            holder.binding.activeIndicator.setVisibility(View.GONE);
         }
 
-        boolean selected = isSelected(position);
-        label.setText(getItem(position));
-        label.setTextColor(selected ? primaryColor : textColorProvider.get());
-        label.setTypeface(selected ? Typeface.DEFAULT_BOLD : Typeface.DEFAULT);
-        label.setBackground(selected
-                ? roundRectWithStroke(0x262F7CFF, 18, primaryColor, 2)
-                : roundRect(cardColorProvider.get(), 18));
-        return container;
+        holder.itemView.setOnClickListener(v -> {
+            if (clickListener != null) {
+                int adapterPosition = holder.getAdapterPosition();
+                if (adapterPosition != RecyclerView.NO_POSITION) {
+                    clickListener.onClick(adapterPosition);
+                }
+            }
+        });
+        holder.itemView.setOnLongClickListener(v -> {
+            if (longClickListener != null) {
+                int adapterPosition = holder.getAdapterPosition();
+                if (adapterPosition != RecyclerView.NO_POSITION) {
+                    longClickListener.onLongClick(adapterPosition);
+                }
+            }
+            return true;
+        });
+        holder.binding.refreshSubscriptionButton.setOnClickListener(v -> {
+            if (refreshClickListener != null) {
+                int adapterPosition = holder.getAdapterPosition();
+                if (adapterPosition != RecyclerView.NO_POSITION) {
+                    refreshClickListener.onRefreshClick(adapterPosition);
+                }
+            }
+        });
     }
 
-    private boolean isSelected(int position) {
-        String activeId = activeIdProvider.get();
-        return activeId != null
-                && position >= 0
-                && position < subscriptions.size()
-                && activeId.equals(subscriptions.get(position).id);
+    @Override
+    public int getItemCount() {
+        return subscriptions.size();
     }
 
-    private GradientDrawable roundRect(int color, int radiusDp) {
-        GradientDrawable drawable = new GradientDrawable();
-        drawable.setColor(color);
-        drawable.setCornerRadius(dp(radiusDp));
-        return drawable;
+    private static int dp(View view, int value) {
+        return Math.round(value * view.getResources().getDisplayMetrics().density);
     }
 
-    private GradientDrawable roundRectWithStroke(int color, int radiusDp, int strokeColor, int strokeWidthDp) {
-        GradientDrawable drawable = roundRect(color, radiusDp);
-        drawable.setStroke(dp(strokeWidthDp), strokeColor);
-        return drawable;
+    private static int resolveAttrColor(View view, int attr) {
+        android.util.TypedValue typedValue = new android.util.TypedValue();
+        view.getContext().getTheme().resolveAttribute(attr, typedValue, true);
+        return view.getContext().getColor(typedValue.resourceId);
     }
 
-    private int dp(int value) {
-        float density = getContext().getResources().getDisplayMetrics().density;
-        return Math.round(value * density);
+    static final class ViewHolder extends RecyclerView.ViewHolder {
+        final ItemSubscriptionBinding binding;
+
+        ViewHolder(ItemSubscriptionBinding binding) {
+            super(binding.getRoot());
+            this.binding = binding;
+        }
     }
 }

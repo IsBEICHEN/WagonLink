@@ -1,0 +1,7 @@
+﻿<?xml version='1.0' encoding='utf-8' standalone='yes' ?>
+<map>
+    <string name="last_subscription_id">test-gntv</string>
+    <string name="theme">system</string>
+    <boolean name="glass_effect" value="true" />
+    <boolean name="floating_window" value="false" />
+</map>
